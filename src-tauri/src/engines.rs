@@ -14,6 +14,35 @@ pub trait Embedder: Send + Sync {
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 
+/// Abstracción de reconocimiento de entidades nombradas (NER).
+pub trait NerEngine {
+    /// Devuelve las menciones detectadas con su etiqueta (`person`, `location`,
+    /// `organization`, …).
+    fn extract(&mut self, text: &str) -> Result<Vec<NerMention>>;
+}
+
+/// Una mención de entidad detectada por un motor NER.
+pub struct NerMention {
+    pub text: String,
+    pub label: String,
+}
+
+/// Caché de motores pesados, administrado por Tauri para reutilizar modelos ya
+/// cargados cuando el usuario activa el perfil de "mantener en memoria".
+pub struct ModelCache {
+    pub gliner: std::sync::Mutex<Option<Gliner2Engine>>,
+    pub embedder: std::sync::Mutex<Option<FastEmbedder>>,
+}
+
+impl ModelCache {
+    pub fn new() -> Self {
+        Self {
+            gliner: std::sync::Mutex::new(None),
+            embedder: std::sync::Mutex::new(None),
+        }
+    }
+}
+
 /// Implementación con `fastembed` (modelo multilingüe, descarga bajo demanda).
 pub struct FastEmbedder {
     model: fastembed::TextEmbedding,
@@ -56,6 +85,89 @@ pub fn create_embedder(settings: &IaSettings, cache_dir: &Path) -> Option<FastEm
         return None;
     }
     FastEmbedder::try_new(cache_dir).ok()
+}
+
+/// Nombre del archivo marcador que indica que el modelo GLiNER2 ya se descargó.
+///
+/// `gliner2-rs` delega la descarga en `hf-hub`, que guarda los pesos en el caché
+/// compartido de HuggingFace (`~/.cache/huggingface`), no en `cache_dir`. Por eso
+/// usamos un marcador propio para saber si ya se descargó sin tocar la red.
+const GLINER_MARKER: &str = ".downloaded";
+
+/// Implementación de NER con GLiNER2 (modelo local `gliner2-multi-v1`).
+///
+/// Carga bajo demanda el checkpoint ONNX (~1 GB). Los candidatos se limitan a la
+/// etiqueta `person` y se fusionan luego con las reglas locales en [`crate::nlp`].
+pub struct Gliner2Engine {
+    engine: gliner2_rs::SpanEngine,
+}
+
+// SAFETY: `SpanEngine` contiene sesiones de `ort` (que son `Send + Sync`) y
+// handles de memoria de ONNX Runtime que viven junto a esas sesiones. El acceso
+// se serializa mediante `Mutex` en [`ModelCache`], de modo que nunca se usa de
+// forma concurrente desde varios hilos; el motor se limita a moverse entre hilos
+// de forma secuencial.
+unsafe impl Send for Gliner2Engine {}
+
+impl Gliner2Engine {
+    /// Carga el modelo, descargándolo en el caché de HuggingFace la primera vez.
+    ///
+    /// Es **idempotente**: `hf-hub` verifica el caché y no vuelve a descargar los
+    /// pesos si ya están presentes. Tras una carga correcta se escribe un marcador
+    /// para que [`is_gliner_cached`] lo refleje sin depender del caché externo.
+    pub fn try_new(cache_dir: &Path) -> Result<Self> {
+        // Debe llamarse una vez por proceso, antes de construir el motor.
+        gliner2_rs::init("pluma");
+
+        let config = gliner2_rs::SpanConfig::new(cache_dir.to_path_buf())
+            .or_download(gliner2_rs::hub::GLINER2_MULTI_V1)
+            .with_intra_threads(2);
+        let engine = gliner2_rs::SpanEngine::new(config)
+            .map_err(|e| AppError::Internal(format!("no se pudo cargar el modelo GLiNER2: {e}")))?;
+
+        std::fs::create_dir_all(cache_dir)?;
+        std::fs::write(cache_dir.join(GLINER_MARKER), b"ok")?;
+        Ok(Self { engine })
+    }
+}
+
+impl NerEngine for Gliner2Engine {
+    fn extract(&mut self, text: &str) -> Result<Vec<NerMention>> {
+        let tasks = vec![gliner2_rs::SchemaTask::Entities(vec![
+            "person".to_string(),
+            "location".to_string(),
+            "organization".to_string(),
+        ])];
+        let output = self
+            .engine
+            .extract(text, &tasks)
+            .map_err(|e| AppError::Internal(format!("error al ejecutar GLiNER2: {e}")))?;
+
+        let mentions: Vec<NerMention> = output
+            .entities
+            .into_iter()
+            .filter(|e| matches!(e.label.as_str(), "person" | "location" | "organization"))
+            .map(|e| NerMention {
+                text: e.text.trim().to_string(),
+                label: e.label,
+            })
+            .filter(|m| !m.text.is_empty())
+            .collect();
+        Ok(mentions)
+    }
+}
+
+/// Indica si el modelo GLiNER2 ya se descargó (según el marcador local).
+pub fn is_gliner_cached(cache_dir: &Path) -> bool {
+    cache_dir.join(GLINER_MARKER).is_file()
+}
+
+/// Crea el motor de NER según la configuración. `None` = usar solo reglas.
+pub fn create_ner(settings: &IaSettings, cache_dir: &Path) -> Option<Gliner2Engine> {
+    if settings.ner_engine != "gliner" {
+        return None;
+    }
+    Gliner2Engine::try_new(cache_dir).ok()
 }
 
 /// Similitud coseno entre dos vectores.

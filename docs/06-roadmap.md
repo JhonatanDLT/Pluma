@@ -45,7 +45,7 @@ añadir IA profunda o TTS neuronal.
 - [x] Co-ocurrencia → relaciones con tipo (familia/romance/rivalidad/amistad).
 - [x] Enriquecimiento de descripciones con LLM local (Ollama, opcional).
 
-**Pendiente (Capa 2 avanzada)**: embeddings (`fastembed-rs`) y NER (GLiNER) — ver `docs/07`.
+**Capa 2 avanzada** (embeddings + NER GLiNER2): implementada en la Fase 5, opt-in.
 
 **Criterio de salida**: en un texto de prueba, se detectan los personajes principales y
 se genera una ficha con relaciones sugeridas. ✅
@@ -79,9 +79,16 @@ se genera una ficha con relaciones sugeridas. ✅
 
 - [x] Integración **Ollama** (opcional) para enriquecer descripciones de personaje.
 - [x] Embeddings (`fastembed`) para resolución de alias semántica (opt-in).
-- [ ] NER con GLiNER — aplazado por conflicto de versiones de `ort` (ver `docs/07`).
-- [ ] Exportar EPUB.
+- [x] NER con **GLiNER2** (`gliner2-rs`) como motor opcional, con fallback a reglas.
+- [x] Bootstrap autocontenido del **runtime de ONNX Runtime** (descarga opt-in).
+- [x] **Entidades** no humanas (lugares y facciones) con GLiNER2.
+- [x] **Hoja de personaje** (ficha detallada) y pestañas de análisis.
+- [x] **Corrector gramatical** con LLM local (Ollama).
+- [x] **Perfil de rendimiento**: mantener modelos en memoria (opt-in, `keep_loaded`).
+- [x] **Exportar/importar EPUB** y **inferencia de estructura** para texto plano.
 - [ ] TTS neuronal local (Piper) y voces por personaje.
+- [ ] Test de ida y vuelta EPUB (exportar → importar y verificar capítulos).
+- [ ] Ampliar el clasificador de estructura: encabezados centrados y numeración `1.` / `1)`.
 
 **Criterio de salida**: con Ollama activo, generar una ficha enriquecida desde un
 fragmento; sin Ollama, la app sigue funcionando con la Capa 1.

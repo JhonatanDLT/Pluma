@@ -34,8 +34,12 @@ genpdf = "0.2.0"
 strsim = "0.11.1"
 zip = "9.0.5"
 roxmltree = "0.21.1"
-fastembed = "7.5.0"
+fastembed = "6.1.0"
+gliner2-rs = { version = "0.9.6", default-features = false, features = ["hub"] }
 ureq = "2"
+tar = "0.4"
+flate2 = "1"
+sha2 = "0.10"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

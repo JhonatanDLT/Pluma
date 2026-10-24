@@ -9,7 +9,9 @@ mod models;
 mod nlp;
 mod parser;
 mod repo;
+mod runtime;
 mod settings;
+mod structure;
 mod tts;
 
 use std::path::PathBuf;
@@ -18,14 +20,14 @@ use tauri::Manager;
 
 pub use error::{AppError, Result};
 
-/// Resuelve la ruta del archivo SQLite dentro del directorio de datos de la app.
-fn resolve_db_path(app: &tauri::AppHandle) -> Result<PathBuf> {
+/// Resuelve el directorio de datos de la aplicación, creándolo si es necesario.
+fn resolve_data_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
     let dir = app.path().app_data_dir().map_err(|e| {
         AppError::Internal(format!("no se pudo resolver el directorio de datos: {e}"))
     })?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| AppError::Internal(format!("no se pudo crear el directorio de datos: {e}")))?;
-    Ok(dir.join("pluma.db"))
+    Ok(dir)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,8 +36,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let path = resolve_db_path(app.handle())?;
-            app.manage(db::Db::open(&path)?);
+            let dir = resolve_data_dir(app.handle())?;
+            // Prepara el runtime de ONNX Runtime (fija ORT_DYLIB_PATH si ya está
+            // instalado) antes de que ningún motor pesado intente cargarse.
+            crate::runtime::prepare(&dir);
+            app.manage(db::Db::open(&dir.join("pluma.db"))?);
+            app.manage(crate::engines::ModelCache::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -62,8 +68,11 @@ pub fn run() {
             commands::list_characters,
             commands::list_relationships,
             commands::delete_character,
+            commands::list_entities,
+            commands::delete_entity,
             commands::analyze_project,
             commands::enrich_project,
+            commands::correct_text,
             commands::ia_status,
             commands::ia_set_settings,
             commands::ia_install,

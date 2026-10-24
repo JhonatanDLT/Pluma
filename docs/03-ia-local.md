@@ -55,16 +55,17 @@ flowchart TB
 
 ### 3.2 Detección de personajes (NER)
 
-| Opción | Librería | Modelo | Tamaño | Notas |
-|--------|----------|--------|--------|-------|
-| **A (recomendada para MVP)** | Reglas + gazetteer + atribución de diálogo | — | 0 | Nombres en mayúscula, `— dijo Ana —`, apodos |
-| **B (fase 2)** | `ort` (ONNX Runtime) | DistilBERT/mDeBERTa-NER cuantizado | ~80–150 MB | NER real y multilingüe |
+| Opción | Estado | Librería | Modelo | Tamaño | Notas |
+|--------|--------|----------|--------|--------|-------|
+| **A (reglas)** | ✅ implementada | Heurísticas propias | — | 0 | Nombres en mayúscula, `— dijo Ana —`, apodos |
+| **B (GLiNER2)** | ✅ implementada (opt-in) | `gliner2-rs` (span, ONNX) | `gliner2-multi-v1` | ~1 GB | NER zero-shot multilingüe, etiqueta `person` |
 
 > Alternativa considerada: `rust-bert` (con `tch`/libtorch). Se **descarta** por ser
-> pesado y de mantenimiento irregular. `ort` + un modelo ONNX cuantizado es más ligero.
+> pesado y de mantenimiento irregular. GLiNER2 sobre ONNX Runtime es más ligero y preciso.
 
-**Recomendación**: empezar con **A** (reglas) y añadir **B** cuando la precisión de
-nombres no hispanos/ambiguos lo justifique.
+**Recomendación**: usar **A** siempre (fallback) y activar **B** cuando se desee mayor
+precisión con nombres ambiguos o no hispanos. Ambos orígenes se fusionan en el mismo
+pipeline antes de agrupar alias.
 
 ### 3.3 Resolución de alias y agrupación
 
@@ -124,18 +125,29 @@ Se recomienda **Ollama** como runtime y un modelo pequeño cuantizado:
 
 ---
 
-## 5. Dependencias Rust propuestas
+## 5. Dependencias Rust (en uso)
 
 ```toml
 # nlp — embeddings y NER
-fastembed = "3"          # embeddings locales (ONNX)
-ort = "2"                # ONNX Runtime para NER (fase 2)
-reqwest = { version = "0.12", features = ["json"] }  # cliente Ollama
+fastembed = "6.1"            # embeddings locales (ONNX), multilingual-e5-small
+gliner2-rs = { version = "0.9", default-features = false, features = ["hub"] }  # NER GLiNER2
+
+# runtime ONNX Runtime (bootstrap autocontenido)
+ureq = "2"                   # descarga del runtime y del modelo
+tar = "0.4"                  # extracción del runtime
+flate2 = "1"                  # descompresión gzip (.tgz)
+sha2 = "0.10"                # verificación de integridad
 
 # utilidades
-pulldown-cmark = "0.11"  # parseo Markdown
-strsim = "0.11"          # similitud de cadenas (Levenshtein/Jaro)
+pulldown-cmark = "0.13"      # parseo Markdown
+strsim = "0.11"              # similitud de cadenas (Levenshtein/Jaro)
 ```
+
+> El runtime de ONNX Runtime se descarga una sola vez (con permiso) desde los
+> **releases oficiales** (`src/runtime.rs`) y se fija vía `ORT_DYLIB_PATH`, porque
+> `ort` se compila en modo `load-dynamic` al convivir `fastembed` y `gliner2-rs`
+> en el mismo árbol. Se usa el release oficial (no el CDN de `ort-sys`) porque este
+> último solo publica la librería estática para macOS.
 
 ---
 

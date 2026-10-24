@@ -1,5 +1,6 @@
 //! Exportación del manuscrito a distintos formatos.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use genpdf::fonts::{FontData, FontFamily};
@@ -14,6 +15,7 @@ pub enum ExportFormat {
     Html,
     Docx,
     Pdf,
+    Epub,
 }
 
 impl ExportFormat {
@@ -24,6 +26,7 @@ impl ExportFormat {
             "html" => Ok(Self::Html),
             "docx" => Ok(Self::Docx),
             "pdf" => Ok(Self::Pdf),
+            "epub" => Ok(Self::Epub),
             other => Err(AppError::Validation(format!(
                 "formato de exportación no soportado: {other}"
             ))),
@@ -43,6 +46,7 @@ pub fn export(
         ExportFormat::Html => write_text(path, &build_html(project_title, content)),
         ExportFormat::Docx => export_docx(project_title, content, path),
         ExportFormat::Pdf => export_pdf(project_title, content, path),
+        ExportFormat::Epub => export_epub(project_title, content, path),
     }
 }
 
@@ -202,6 +206,230 @@ fn export_pdf(project_title: &str, content: &[(Chapter, Vec<Scene>)], path: &Pat
 
     doc.render_to_file(path)
         .map_err(|e| AppError::Internal(format!("no se pudo escribir el PDF: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// EPUB
+// ---------------------------------------------------------------------------
+
+fn export_epub(project_title: &str, content: &[(Chapter, Vec<Scene>)], path: &Path) -> Result<()> {
+    use zip::{CompressionMethod, ZipWriter};
+
+    let book_id = format!("urn:uuid:{}", uuid::Uuid::new_v4());
+    let file = std::fs::File::create(path)
+        .map_err(|e| AppError::Internal(format!("no se pudo crear el archivo: {e}")))?;
+    let mut zip = ZipWriter::new(file);
+
+    // (título, cuerpo HTML) por capítulo.
+    let chapters: Vec<(String, String)> = content
+        .iter()
+        .map(|(chapter, scenes)| (chapter.title.clone(), build_chapter_html(chapter, scenes)))
+        .collect();
+
+    // `mimetype` debe ir primero y sin comprimir (requisito EPUB).
+    write_epub_entry(
+        &mut zip,
+        "mimetype",
+        "application/epub+zip",
+        CompressionMethod::Stored,
+    )?;
+    write_epub_entry(
+        &mut zip,
+        "META-INF/container.xml",
+        &container_xml(),
+        CompressionMethod::Deflated,
+    )?;
+    write_epub_entry(
+        &mut zip,
+        "OEBPS/content.opf",
+        &build_opf(project_title, &book_id, &chapters),
+        CompressionMethod::Deflated,
+    )?;
+    write_epub_entry(
+        &mut zip,
+        "OEBPS/toc.ncx",
+        &build_ncx(project_title, &book_id, &chapters),
+        CompressionMethod::Deflated,
+    )?;
+    write_epub_entry(
+        &mut zip,
+        "OEBPS/nav.xhtml",
+        &build_nav_xhtml(&chapters),
+        CompressionMethod::Deflated,
+    )?;
+
+    for (i, (title, body)) in chapters.iter().enumerate() {
+        let name = format!("OEBPS/chapter-{}.xhtml", i + 1);
+        let xhtml = build_chapter_xhtml(title, body);
+        write_epub_entry(&mut zip, &name, &xhtml, CompressionMethod::Deflated)?;
+    }
+
+    zip.finish()
+        .map_err(|e| AppError::Internal(format!("no se pudo finalizar el EPUB: {e}")))?;
+    Ok(())
+}
+
+fn write_epub_entry(
+    zip: &mut zip::ZipWriter<std::fs::File>,
+    name: &str,
+    data: &str,
+    method: zip::CompressionMethod,
+) -> Result<()> {
+    let options = zip::write::SimpleFileOptions::default().compression_method(method);
+    zip.start_file(name, options)
+        .map_err(|e| AppError::Internal(format!("no se pudo iniciar {name}: {e}")))?;
+    zip.write_all(data.as_bytes())
+        .map_err(|e| AppError::Internal(format!("no se pudo escribir {name}: {e}")))?;
+    Ok(())
+}
+
+fn build_chapter_html(_chapter: &Chapter, scenes: &[Scene]) -> String {
+    let mut body = String::new();
+    for scene in scenes {
+        if let Some(title) = &scene.title {
+            body.push_str(&format!("<h2>{}</h2>\n", escape_xml(title)));
+        }
+        body.push_str(&markdown_to_html(&scene.content_markdown));
+    }
+    body
+}
+
+fn markdown_to_html(markdown: &str) -> String {
+    let mut out = String::new();
+    pulldown_cmark::html::push_html(
+        &mut out,
+        pulldown_cmark::Parser::new_ext(markdown, pulldown_cmark::Options::all()),
+    );
+    out
+}
+
+fn container_xml() -> String {
+    r#"<?xml version="1.0" encoding="utf-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+"#
+    .to_string()
+}
+
+fn build_opf(title: &str, book_id: &str, chapters: &[(String, String)]) -> String {
+    let mut manifest = String::new();
+    manifest.push_str(
+        r#"    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+"#,
+    );
+    for i in 0..chapters.len() {
+        manifest.push_str(&format!(
+            "    <item id=\"ch{}\" href=\"chapter-{}.xhtml\" media-type=\"application/xhtml+xml\"/>\n",
+            i + 1,
+            i + 1
+        ));
+    }
+
+    let mut spine = String::new();
+    for i in 0..chapters.len() {
+        spine.push_str(&format!("    <itemref idref=\"ch{}\"/>\n", i + 1));
+    }
+
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">{book_id}</dc:identifier>
+    <dc:title>{title}</dc:title>
+    <dc:language>es</dc:language>
+  </metadata>
+  <manifest>
+{manifest}  </manifest>
+  <spine toc="ncx">
+{spine}  </spine>
+</package>
+"#,
+        book_id = book_id,
+        title = escape_xml(title),
+        manifest = manifest,
+        spine = spine,
+    )
+}
+
+fn build_ncx(title: &str, book_id: &str, chapters: &[(String, String)]) -> String {
+    let mut nav = String::new();
+    for (i, (chapter_title, _)) in chapters.iter().enumerate() {
+        nav.push_str(&format!(
+            "    <navPoint id=\"ch{}\" playOrder=\"{}\"><navLabel><text>{}</text></navLabel><content src=\"chapter-{}.xhtml\"/></navPoint>\n",
+            i + 1,
+            i + 1,
+            escape_xml(chapter_title),
+            i + 1
+        ));
+    }
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head><meta name="dtb:uid" content="{book_id}"/></head>
+  <docTitle><text>{title}</text></docTitle>
+  <navMap>
+{nav}  </navMap>
+</ncx>
+"#,
+        book_id = book_id,
+        title = escape_xml(title),
+        nav = nav,
+    )
+}
+
+fn build_nav_xhtml(chapters: &[(String, String)]) -> String {
+    let mut items = String::new();
+    for (i, (title, _)) in chapters.iter().enumerate() {
+        items.push_str(&format!(
+            "      <li><a href=\"chapter-{}.xhtml\">{}</a></li>\n",
+            i + 1,
+            escape_xml(title)
+        ));
+    }
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Índice</title></head>
+<body>
+  <nav epub:type="toc">
+    <ol>
+{items}    </ol>
+  </nav>
+</body>
+</html>
+"#,
+        items = items
+    )
+}
+
+fn build_chapter_xhtml(title: &str, body: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>{title}</title></head>
+<body>
+<h1>{title}</h1>
+{body}
+</body>
+</html>
+"#,
+        title = escape_xml(title),
+        body = body,
+    )
+}
+
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn split_paragraphs(markdown: &str) -> Vec<String> {

@@ -10,7 +10,9 @@ use crate::error::{AppError, Result};
 use crate::export;
 use crate::extract;
 use crate::llm;
-use crate::models::{AnalysisReport, Chapter, Character, Project, Relationship, Scene, SceneMeta};
+use crate::models::{
+    AnalysisReport, Chapter, Character, Entity, Project, Relationship, Scene, SceneMeta,
+};
 use crate::nlp;
 use crate::parser;
 use crate::repo;
@@ -23,6 +25,12 @@ fn lock<'a>(db: &'a State<'_, Db>) -> Result<MutexGuard<'a, Connection>> {
     db.conn
         .lock()
         .map_err(|_| AppError::Internal("estado de base de datos corrupto".into()))
+}
+
+/// Adquiere el guard de un `Mutex` de modelos de forma segura.
+fn lock_model<T>(m: &std::sync::Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>> {
+    m.lock()
+        .map_err(|_| AppError::Internal("estado de modelos corrupto".into()))
 }
 
 // ---------------------------------------------------------------------------
@@ -251,27 +259,82 @@ pub fn delete_character(db: State<'_, Db>, id: String) -> Result<()> {
 }
 
 #[tauri::command]
+pub fn list_entities(db: State<'_, Db>, project_id: String) -> Result<Vec<Entity>> {
+    let conn = lock(&db)?;
+    repo::list_entities(&conn, &project_id)
+}
+
+#[tauri::command]
+pub fn delete_entity(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::delete_entity(&conn, &id)
+}
+
+#[tauri::command]
 pub fn analyze_project(
     app: tauri::AppHandle,
     db: State<'_, Db>,
     project_id: String,
 ) -> Result<AnalysisReport> {
     let settings = crate::settings::load(&settings_path(&app)?);
-    let mut guard = lock(&db)?;
-    let content = repo::get_project_content(&guard, &project_id)?;
-    let texts: Vec<String> = content
-        .iter()
-        .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
-        .collect();
+    let data_dir = data_dir(&app)?;
 
-    let (detected_chars, detected_rels) = {
-        let mut embedder = crate::engines::create_embedder(&settings, &embedder_cache_dir(&app)?);
-        nlp::analyze(&texts, embedder.as_mut())
+    let texts: Vec<String> = {
+        let guard = lock(&db)?;
+        let content = repo::get_project_content(&guard, &project_id)?;
+        content
+            .iter()
+            .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
+            .collect()
     };
+
+    // Los motores pesados solo se cargan si el runtime de ONNX Runtime está
+    // disponible; en caso contrario se usan exclusivamente las reglas locales.
+    let onnxrt_ready = crate::runtime::is_available(&data_dir);
+    let cache = app.state::<crate::engines::ModelCache>();
+
+    let result = {
+        let mut embedder_guard = lock_model(&cache.embedder)?;
+        let mut ner_guard = lock_model(&cache.gliner)?;
+
+        let embedder = if onnxrt_ready {
+            if embedder_guard.is_none() || !settings.keep_loaded {
+                *embedder_guard =
+                    crate::engines::create_embedder(&settings, &embedder_cache_dir(&app)?);
+            }
+            embedder_guard.as_mut()
+        } else {
+            None
+        };
+
+        let ner = if onnxrt_ready {
+            if ner_guard.is_none() || !settings.keep_loaded {
+                *ner_guard = crate::engines::create_ner(&settings, &gliner_cache_dir(&app)?);
+            }
+            ner_guard.as_mut()
+        } else {
+            None
+        };
+
+        match ner {
+            Some(ner) => nlp::analyze_with_ner(&texts, ner, embedder),
+            None => nlp::analyze(&texts, embedder),
+        }
+    };
+
+    // En el perfil de mínimo consumo, libera los modelos tras cada análisis.
+    if !settings.keep_loaded {
+        if let Ok(mut g) = cache.embedder.lock() {
+            *g = None;
+        }
+        if let Ok(mut g) = cache.gliner.lock() {
+            *g = None;
+        }
+    }
 
     let mut characters: Vec<Character> = Vec::new();
     let mut name_to_id: HashMap<String, String> = HashMap::new();
-    for dc in &detected_chars {
+    for dc in &result.characters {
         let mut character = Character::new(&project_id, &dc.name);
         character.role = Some(dc.role.clone());
         character.aliases = dc.aliases.clone();
@@ -285,7 +348,7 @@ pub fn analyze_project(
     }
 
     let mut relationships: Vec<Relationship> = Vec::new();
-    for dr in &detected_rels {
+    for dr in &result.relationships {
         if let (Some(a), Some(b)) = (name_to_id.get(&dr.a), name_to_id.get(&dr.b)) {
             relationships.push(Relationship {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -299,12 +362,31 @@ pub fn analyze_project(
         }
     }
 
+    let entities: Vec<Entity> = result
+        .entities
+        .iter()
+        .map(|de| {
+            let mut entity = Entity::new(&project_id, &de.name, &de.entity_type);
+            entity.aliases = de.aliases.clone();
+            entity.mention_count = de.mention_count as i64;
+            entity.description = if de.description.is_empty() {
+                None
+            } else {
+                Some(de.description.clone())
+            };
+            entity
+        })
+        .collect();
+
+    let mut guard = lock(&db)?;
     repo::replace_characters(&mut *guard, &project_id, &characters)?;
     repo::replace_relationships(&mut *guard, &project_id, &relationships)?;
+    repo::replace_entities(&mut *guard, &project_id, &entities)?;
 
     Ok(AnalysisReport {
         characters,
         relationships,
+        entities,
     })
 }
 
@@ -333,6 +415,13 @@ pub fn enrich_project(
     repo::list_characters(&conn, &project_id)
 }
 
+/// Corrige gramática, ortografía y puntuación con un LLM local (Ollama).
+#[tauri::command]
+pub fn correct_text(text: String, model: Option<String>) -> Result<String> {
+    let model = model.unwrap_or_else(|| llm::DEFAULT_MODEL.to_string());
+    llm::correct_grammar(&model, &text)
+}
+
 // ---------------------------------------------------------------------------
 // Configuración de IA (opt-in)
 // ---------------------------------------------------------------------------
@@ -351,10 +440,16 @@ fn embedder_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(data_dir(app)?.join("models").join("embeddings"))
 }
 
+fn gliner_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
+    Ok(data_dir(app)?.join("models").join("gliner"))
+}
+
 #[derive(serde::Serialize)]
 pub struct IaStatus {
     pub settings: IaSettings,
     pub embeddings_cached: bool,
+    pub gliner_cached: bool,
+    pub onnxruntime_available: bool,
     pub ollama_available: bool,
 }
 
@@ -363,6 +458,8 @@ pub fn ia_status(app: tauri::AppHandle) -> Result<IaStatus> {
     let settings = crate::settings::load(&settings_path(&app)?);
     Ok(IaStatus {
         embeddings_cached: crate::engines::is_embeddings_cached(&embedder_cache_dir(&app)?),
+        gliner_cached: crate::engines::is_gliner_cached(&gliner_cache_dir(&app)?),
+        onnxruntime_available: crate::runtime::is_available(&data_dir(&app)?),
         ollama_available: ollama_available(),
         settings,
     })
@@ -377,15 +474,37 @@ pub fn ia_set_settings(app: tauri::AppHandle, settings: IaSettings) -> Result<Ia
 
 #[tauri::command]
 pub fn ia_install(app: tauri::AppHandle, engine: String) -> Result<()> {
+    let data_dir = data_dir(&app)?;
     match engine.as_str() {
+        "onnxruntime" => {
+            crate::runtime::install(&data_dir)?;
+            Ok(())
+        }
         "embeddings" => {
+            require_runtime(&data_dir)?;
             // Cargar el modelo lo descarga en el directorio de caché (~120 MB).
             crate::engines::FastEmbedder::try_new(&embedder_cache_dir(&app)?)?;
+            Ok(())
+        }
+        "gliner" => {
+            require_runtime(&data_dir)?;
+            // Cargar el motor descarga el checkpoint ONNX la primera vez (~1 GB).
+            crate::engines::Gliner2Engine::try_new(&gliner_cache_dir(&app)?)?;
             Ok(())
         }
         other => Err(AppError::Validation(format!(
             "motor de IA no soportado: {other}"
         ))),
+    }
+}
+
+fn require_runtime(data_dir: &std::path::Path) -> Result<()> {
+    if crate::runtime::is_available(data_dir) {
+        Ok(())
+    } else {
+        Err(AppError::Validation(
+            "instala primero el runtime de ONNX Runtime".into(),
+        ))
     }
 }
 

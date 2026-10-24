@@ -11,6 +11,7 @@
     Chapter,
     Character,
     EditorMode,
+    Entity,
     IaStatus,
     Project,
     Relationship,
@@ -24,6 +25,7 @@
   let scenes = $state<SceneMeta[]>([]);
   let characters = $state<Character[]>([]);
   let relationships = $state<Relationship[]>([]);
+  let entities = $state<Entity[]>([]);
 
   let selectedProjectId = $state<string | null>(null);
   let selectedChapterId = $state<string | null>(null);
@@ -39,6 +41,8 @@
   let importing = $state(false);
   let analyzing = $state(false);
   let enriching = $state(false);
+  let correcting = $state(false);
+  let editorRevision = $state(0);
   let iaStatus = $state<IaStatus | null>(null);
   let showMeta = $state(false);
   let showChars = $state(false);
@@ -60,6 +64,7 @@
     { format: "html", label: "HTML", ext: "html" },
     { format: "docx", label: "Word", ext: "docx" },
     { format: "pdf", label: "PDF", ext: "pdf" },
+    { format: "epub", label: "EPUB", ext: "epub" },
   ];
 
   onMount(async () => {
@@ -98,6 +103,7 @@
     scenes = [];
     characters = await api.listCharacters(id);
     relationships = await api.listRelationships(id);
+    entities = await api.listEntities(id);
   }
 
   async function selectChapter(id: string) {
@@ -172,6 +178,7 @@
         scenes = [];
         characters = [];
         relationships = [];
+        entities = [];
       }
       projects = await api.listProjects();
     } catch (e) {
@@ -223,13 +230,14 @@
           {
             name: "Todos los formatos",
             extensions: [
-              "md", "markdown", "txt", "pdf", "docx",
+              "md", "markdown", "txt", "pdf", "docx", "epub",
               "png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp",
             ],
           },
           { name: "Markdown / Texto", extensions: ["md", "markdown", "txt"] },
           { name: "PDF", extensions: ["pdf"] },
           { name: "Word", extensions: ["docx"] },
+          { name: "EPUB", extensions: ["epub"] },
           {
             name: "Imágenes (OCR)",
             extensions: ["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp"],
@@ -351,6 +359,7 @@
       const report = await api.analyzeProject(selectedProjectId);
       characters = report.characters;
       relationships = report.relationships;
+      entities = report.entities;
     } catch (e) {
       reportError(e);
     } finally {
@@ -364,6 +373,17 @@
       if (selectedProjectId) {
         characters = await api.listCharacters(selectedProjectId);
         relationships = await api.listRelationships(selectedProjectId);
+      }
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function deleteEntity(id: string) {
+    try {
+      await api.deleteEntity(id);
+      if (selectedProjectId) {
+        entities = await api.listEntities(selectedProjectId);
       }
     } catch (e) {
       reportError(e);
@@ -410,6 +430,46 @@
     }
   }
 
+  async function installGliner() {
+    try {
+      await api.iaInstall("gliner");
+      iaStatus = await api.iaStatus();
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function installOnnxRuntime() {
+    try {
+      await api.iaInstall("onnxruntime");
+      iaStatus = await api.iaStatus();
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateNerEngine(engine: string) {
+    if (!iaStatus) return;
+    try {
+      const settings = { ...iaStatus.settings, ner_engine: engine };
+      const saved = await api.iaSetSettings(settings);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateKeepLoaded(enabled: boolean) {
+    if (!iaStatus) return;
+    try {
+      const settings = { ...iaStatus.settings, keep_loaded: enabled };
+      const saved = await api.iaSetSettings(settings);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Texto a voz
   // -------------------------------------------------------------------------
@@ -428,6 +488,21 @@
       await api.ttsStop();
     } catch (e) {
       reportError(e);
+    }
+  }
+
+  async function correctGrammar() {
+    if (!selectedSceneId) return;
+    correcting = true;
+    try {
+      const corrected = await api.correctText(sceneContent, null);
+      sceneContent = corrected;
+      editorRevision++;
+      scheduleSave();
+    } catch (e) {
+      reportError(e);
+    } finally {
+      correcting = false;
     }
   }
 
@@ -516,6 +591,12 @@
         {#if selectedSceneId}
           <button class="btn-icon" title="Reproducir" onclick={playTts}>▶</button>
           <button class="btn-icon" title="Detener" onclick={stopTts}>■</button>
+          <button
+            class="btn"
+            title="Corrige gramática y ortografía con un LLM local (Ollama)"
+            onclick={correctGrammar}
+            disabled={correcting}
+          >{correcting ? "Corrigiendo…" : "Corregir"}</button>
         {/if}
 
         <button
@@ -590,7 +671,7 @@
 
     <div class="editor-area">
       {#if selectedSceneId}
-        {#key selectedSceneId}
+        {#key `${selectedSceneId}-${editorRevision}`}
           {#if mode === "wysiwyg"}
             <Editor content={sceneContent} onchange={onContentChange} />
           {:else}
@@ -615,14 +696,20 @@
       <CharactersPanel
         {characters}
         {relationships}
+        {entities}
         {analyzing}
         {enriching}
         {iaStatus}
         onanalyze={analyze}
         onenrich={enrich}
         ondeletecharacter={deleteCharacter}
+        ondeleteentity={deleteEntity}
         onupdateembeddings={updateEmbeddings}
         oninstallembeddings={installEmbeddings}
+        onupdatenerengine={updateNerEngine}
+        oninstallgliner={installGliner}
+        oninstallonnxruntime={installOnnxRuntime}
+        onupdatekeeploaded={updateKeepLoaded}
       />
     </aside>
   {/if}

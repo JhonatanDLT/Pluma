@@ -17,25 +17,31 @@
 - **Persistencia** SQLite: proyectos → capítulos → escenas, con migraciones versionadas.
 - **Autoguardado** con debounce e indicador de estado.
 - **Parser de estructura**: capítulos (`#`), escenas (`##`) y beats (`###`).
-- **Importación**: `.md`, `.txt`, `.pdf` (con capa de texto) y `.docx`.
+- **Importación**: `.md`, `.txt`, `.pdf` (con capa de texto), `.docx` y `.epub`, con **inferencia de estructura** para texto plano sin encabezados.
 - **Metadatos**: estado, resumen, POV, lugar y tiempo por capítulo/escena.
 - **Reordenamiento** por arrastrar y soltar.
-- **Exportación**: Markdown, TXT, HTML, Word (`.docx`) y PDF.
-- **IA local modular (opt-in)**: personajes y relaciones por reglas (siempre) + embeddings semánticos y LLM (Ollama) opcionales.
+- **Exportación**: Markdown, TXT, HTML, Word (`.docx`), PDF y EPUB.
+- **IA local modular (opt-in)**: personajes y relaciones por reglas (siempre), más **NER con GLiNER2** y **embeddings semánticos** opcionales, y **LLM (Ollama)** para enriquecer descripciones.
+- **Entidades** (lugares y facciones) detectadas con GLiNER2, con pestañas dedicadas.
+- **Hoja de personaje** (ficha detallada) al seleccionar un personaje.
+- **Corrector gramatical** de escenas con LLM local (Ollama).
+- **Perfil de rendimiento**: opción de mantener los modelos cargados en memoria.
 - **TTS**: voz del sistema operativo.
 - **Estilo** minimalista y elegante (paleta cálida, tipografía serif, modo oscuro).
 
 ### ⚠️ Opcional (opt-in, descarga bajo demanda)
 
+- **NER con GLiNER2** (`gliner2-rs`): modelo local multilingüe (~1 GB) para detectar personajes con mayor precisión.
 - **Embeddings semánticos** (`fastembed`): descarga ~120 MB la primera vez; mejora la resolución de alias.
-- **Enriquecimiento con LLM (Ollama)**: genera descripciones de personaje con un LLM local.
+- **Runtime ONNX Runtime**: se descarga e instala automáticamente (con permiso) la primera vez que se activa un motor de IA local.
+- **Enriquecimiento con LLM (Ollama)**: genera descripciones de personaje y corrige gramática/ortografía con un LLM local.
 - **OCR de imágenes y PDFs escaneados**: requiere Tesseract (+ Poppler para PDFs escaneados).
 
 ### 🔜 Pendiente (mejoras)
 
-- IA más precisa: embeddings (`fastembed-rs`), NER (GLiNER) y LLM local — ver `docs/07`.
 - TTS neuronal (Piper) — ver `docs/04`.
-- Pulido: atajos de teclado, modo foco, split-view.
+- Exportar EPUB.
+- Pulido: atajos de teclado, modo foco, split-view, edición de fichas de personaje.
 
 ---
 
@@ -84,11 +90,19 @@ chronotriggerv0/
 │     ├─ main.rs                # Punto de entrada
 │     ├─ lib.rs                 # Builder, estado y handlers
 │     ├─ error.rs               # AppError (thiserror + Serialize)
-│     ├─ models.rs              # Project / Chapter / Scene
+│     ├─ models.rs              # Project / Chapter / Scene / Character
 │     ├─ db.rs                  # Conexión + migraciones
 │     ├─ repo.rs                # Acceso a datos
 │     ├─ parser.rs              # Parser Markdown → capítulos/escenas/beats
-│     ├─ extract.rs             # Extracción de texto (PDF / OCR)
+│     ├─ structure.rs           # Inferencia de estructura (texto plano)
+│     ├─ extract.rs             # Extracción de texto (PDF / DOCX / EPUB / OCR)
+│     ├─ export.rs              # Exportación (md/txt/html/docx/pdf)
+│     ├─ settings.rs            # Configuración de IA (opt-in)
+│     ├─ engines.rs             # Motores de IA (embeddings, NER GLiNER2)
+│     ├─ runtime.rs             # Bootstrap del runtime de ONNX Runtime
+│     ├─ nlp.rs                 # Análisis narrativo (Capa 1)
+│     ├─ llm.rs                 # Enriquecimiento con LLM (Ollama)
+│     ├─ tts.rs                 # Texto a voz
 │     └─ commands.rs            # Comandos @tauri::command
 └─ package.json
 ```
@@ -125,8 +139,9 @@ cargo check     # Rust (desde src-tauri/)
   En macOS: `brew install tesseract tesseract-lang poppler`.
 - **LLM local (Ollama)**: para el botón "Enriquecer". Instala [Ollama](https://ollama.com) y un
   modelo, p. ej. `ollama pull qwen2.5:1.5b`.
-- **Embeddings** (`fastembed`): se descarga automáticamente (~120 MB) al activar la opción y
-  pulsar "Descargar modelo".
+- **IA local (GLiNER2 / embeddings)**: la app descarga e instala el **runtime de ONNX Runtime**
+  automáticamente (con permiso) la primera vez. Los modelos se descargan bajo demanda:
+  GLiNER2 (~1 GB) y embeddings (~120 MB).
 
 ---
 
@@ -146,8 +161,8 @@ cargo check     # Rust (desde src-tauri/)
 
 ## Siguientes pasos
 
-1. **Mejoras de IA** — embeddings (`fastembed-rs`), NER (GLiNER) y LLM local (ver [`docs/07-investigacion-ia.md`](docs/07-investigacion-ia.md)).
-2. **TTS neuronal** — Piper (ver [`docs/04-tts.md`](docs/04-tts.md)).
+1. **TTS neuronal** — Piper (ver [`docs/04-tts.md`](docs/04-tts.md)).
+2. **Exportar EPUB** — ampliar `export.rs`.
 3. **Pulido** — atajos de teclado, modo foco, split-view, edición de fichas de personaje.
 
 Ver [`docs/06-roadmap.md`](docs/06-roadmap.md) para el detalle completo.

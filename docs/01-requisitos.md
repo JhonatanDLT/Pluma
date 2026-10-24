@@ -10,12 +10,15 @@ con el método **MoSCoW**: `M` (must), `S` (should), `C` (could), `W` (won't now
 
 - ✅ **Editor + persistencia** (FR-01..04, FR-40): editor WYSIWYG/Markdown, SQLite, autoguardado, proyectos.
 - ✅ **Estructura narrativa** (FR-10..14): parser de capítulos/escenas/beats, reordenamiento drag&drop, metadatos.
-- ✅ **Personajes y relaciones** (FR-20..25): detección por reglas, alias (con embeddings opt-in), tipos de relación, descripciones + enriquecimiento con LLM local (Ollama).
+- ✅ **Personajes y relaciones** (FR-20..25): detección por reglas + **NER GLiNER2** opt-in, alias (con embeddings opt-in), tipos de relación, descripciones + enriquecimiento con LLM local (Ollama).
+- ✅ **Entidades** (lugares/facciones) detectadas con GLiNER2 y hoja de personaje.
+- ✅ **Corrector gramatical** (FR nuevo) con LLM local (Ollama).
+- ✅ **Perfil de rendimiento**: mantener modelos en memoria (opt-in).
 - ✅ **Exportación** (FR-41..43, FR-46): Markdown, TXT, HTML, Word (`.docx`) y PDF.
 - ✅ **TTS** (FR-30, FR-31): voz del sistema, reproducir/detener.
-- ✅ **Importación** (FR-44): `.md`, `.txt`, `.pdf` (texto) y `.docx`.
+- ✅ **Importación** (FR-44): `.md`, `.txt`, `.pdf` (texto), `.docx` y `.epub`, con inferencia de estructura para texto plano.
 - ⚠️ **OCR** (opcional): requiere Tesseract (+ Poppler para PDFs escaneados).
-- 🔜 **Pendiente**: NER con GLiNER (aplazado por conflicto de `ort`), TTS neuronal (FR-33).
+- 🔜 **Pendiente**: TTS neuronal (FR-33).
 
 ---
 
@@ -93,8 +96,8 @@ visualiza de forma automática, con ayuda de **IA local y ligera**.
 | FR-41 | M | **Exportar** a **Markdown** (`.md`) y **texto plano** (`.txt`). |
 | FR-42 | M | **Exportar** a **Word** (`.docx`) y **HTML** (`.html`). |
 | FR-43 | S | **Exportar** a **PDF** (`.pdf`). |
-| FR-44 | S | **Importar** desde Markdown (`.md`), texto (`.txt`) y Word (`.docx`). |
-| FR-45 | C | **Exportar/importar** a **EPUB** (`.epub`). |
+| FR-44 | S | **Importar** desde Markdown (`.md`), texto (`.txt`), Word (`.docx`) y **EPUB** (`.epub`), con inferencia heurística de capítulos/escenas para texto plano. |
+| FR-45 | C | **Exportar/importar** a **EPUB** (`.epub`). ✅
 | FR-46 | S | Exportación selectiva (proyecto completo, capítulo o selección). |
 | FR-47 | M | Diálogos nativos de guardar/abrir archivo (`tauri-plugin-dialog` + `fs`). |
 

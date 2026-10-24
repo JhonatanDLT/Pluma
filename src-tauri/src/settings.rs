@@ -18,6 +18,9 @@ pub struct IaSettings {
     pub embeddings: bool,
     /// Modelo LLM para el enriquecimiento (`None` = desactivado).
     pub llm_model: Option<String>,
+    /// Perfil de alto rendimiento: mantener los modelos cargados en memoria entre
+    /// análisis. `false` (por defecto) = cargar y liberar en cada uso (mínimo consumo).
+    pub keep_loaded: bool,
 }
 
 impl Default for IaSettings {
@@ -26,6 +29,7 @@ impl Default for IaSettings {
             ner_engine: "rules".to_string(),
             embeddings: false,
             llm_model: None,
+            keep_loaded: false,
         }
     }
 }

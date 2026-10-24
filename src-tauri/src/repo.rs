@@ -2,7 +2,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::error::{AppError, Result};
-use crate::models::{Chapter, Character, Project, Relationship, Scene, SceneMeta};
+use crate::models::{Chapter, Character, Entity, Project, Relationship, Scene, SceneMeta};
 use crate::parser::ParsedManuscript;
 
 // ---------------------------------------------------------------------------
@@ -531,7 +531,61 @@ pub fn replace_relationships(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
+// Entidades (lugares, facciones, …)
+// --------------------------------------------------------------------------
+
+pub fn list_entities(conn: &Connection, project_id: &str) -> Result<Vec<Entity>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, name, entity_type, aliases_json, description, mention_count, created_at, updated_at
+         FROM entity WHERE project_id = ?1 ORDER BY mention_count DESC, name ASC",
+    )?;
+    let entities = stmt
+        .query_map(params![project_id], entity_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(entities)
+}
+
+pub fn replace_entities(
+    conn: &mut Connection,
+    project_id: &str,
+    entities: &[Entity],
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM entity WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    for e in entities {
+        tx.execute(
+            "INSERT INTO entity (id, project_id, name, entity_type, aliases_json, description, mention_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                e.id,
+                e.project_id,
+                e.name,
+                e.entity_type,
+                json(e.aliases.clone()),
+                e.description,
+                e.mention_count,
+                e.created_at,
+                e.updated_at
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn delete_entity(conn: &Connection, id: &str) -> Result<()> {
+    let affected = conn.execute("DELETE FROM entity WHERE id = ?1", params![id])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("entidad {id}")));
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -641,6 +695,20 @@ fn relationship_from_row(row: &Row<'_>) -> rusqlite::Result<Relationship> {
         kind: row.get(4)?,
         intensity: row.get(5)?,
         description: row.get(6)?,
+    })
+}
+
+fn entity_from_row(row: &Row<'_>) -> rusqlite::Result<Entity> {
+    Ok(Entity {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        name: row.get(2)?,
+        entity_type: row.get(3)?,
+        aliases: parse_json_list(row.get(4)?),
+        description: row.get(5)?,
+        mention_count: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 

@@ -3,6 +3,7 @@ import type {
   AnalysisReport,
   Chapter,
   Character,
+  Entity,
   IaSettings,
   IaStatus,
   Project,
@@ -95,12 +96,18 @@ export const listCharacters = (projectId: string) =>
   invoke<Character[]>("list_characters", { projectId });
 export const listRelationships = (projectId: string) =>
   invoke<Relationship[]>("list_relationships", { projectId });
+export const listEntities = (projectId: string) =>
+  invoke<Entity[]>("list_entities", { projectId });
 export const deleteCharacter = (id: string) =>
   invoke<void>("delete_character", { id });
+export const deleteEntity = (id: string) =>
+  invoke<void>("delete_entity", { id });
 export const analyzeProject = (projectId: string) =>
   invoke<AnalysisReport>("analyze_project", { projectId });
 export const enrichProject = (projectId: string, model: string | null) =>
   invoke<Character[]>("enrich_project", { projectId, model });
+export const correctText = (text: string, model: string | null) =>
+  invoke<string>("correct_text", { text, model });
 
 // Configuración de IA (opt-in)
 export const iaStatus = () => invoke<IaStatus>("ia_status");

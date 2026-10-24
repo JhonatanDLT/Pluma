@@ -13,7 +13,7 @@ alias, embeddings y extracción de relaciones.
 
 | Tarea | Solución recomendada | Runtime en Rust | Tamaño aprox. |
 |-------|----------------------|-----------------|---------------|
-| Detección de personajes (NER) | **GLiNER** (`gliner_multi`) | `gline-rs` (Rust) o `ort` (ONNX) | ~200 MB |
+| Detección de personajes (NER) | **GLiNER2** (`gliner2-multi-v1`) | `gliner2-rs` (ONNX) | ~1 GB |
 | Embeddings / resolución de alias | **`multilingual-e5-small`** | `fastembed-rs` (`ort`) | ~118 MB |
 | Reranking (opcional) | `jina-reranker-v2-base-multilingual` | `fastembed-rs` | ~300 MB |
 | Extracción profunda / coreferencia | **Qwen3-1.7B / 4B** (cuantizado) | **`mistral.rs`** (embebido) o Ollama | 1–2.5 GB |
@@ -41,8 +41,10 @@ en Apple Silicon, eliminando la dependencia de Ollama si se desea.
   - `gliner-community/gliner_small-v2.5` — más ligero, calidad algo menor.
   - `knowledgator/gliner-relex-large-v1.0` — **NER + relaciones en un solo pase** (RelEx).
 
-> **Decisión**: usar `gliner_multi` (multilingüe) vía `gline-rs` o `ort`. Empezar por
-> reglas + gazetteer (Capa 1, cero dependencias) y activar GLiNER en la Fase 2.
+> **Decisión final**: implementado con `gliner2-rs` 0.9.6 (arquitectura *span*) y el
+> checkpoint `gliner2-multi-v1`, de forma **opt-in** y con fallback a reglas. El runtime
+> de ONNX Runtime se descarga bajo demanda (`src/runtime.rs`) porque `ort` se compila en
+> modo `load-dynamic` al convivir con `fastembed` en el mismo árbol de dependencias.
 
 ### Alternativas descartadas
 
@@ -128,15 +130,14 @@ Tres niveles, de menor a mayor coste:
 ## 6. Dependencias Rust propuestas (actualizadas)
 
 ```toml
-# Embeddings (Capa 1)
-fastembed = "7"                      # multilingual-e5-small, cache local
+# Embeddings (Capa 1) — en uso
+fastembed = "6.1"                    # multilingual-e5-small, cache local
 
-# NER (Fase 2)
-gline-rs = "0.1"                     # GLiNER nativo en Rust (verificar versión)
-# alternativa: ort = "2" con checkpoint GLiNER-ONNX
+# NER (Fase 2) — en uso
+gliner2-rs = { version = "0.9", default-features = false, features = ["hub"] }
 
-# LLM embebido (Capa 2, opcional)
-mistralrs = { version = "0.9", features = ["metal"] }  # Apple Silicon
+# LLM local (Capa 2, opcional) — Ollama (proceso externo) por ahora
+# mistralrs = { version = "0.9", features = ["metal"] }  # pendiente de evaluar
 
 # Utilidades
 strsim = "0.11"                      # similitud de cadenas
@@ -146,8 +147,8 @@ strsim = "0.11"                      # similitud de cadenas
 
 ## 7. Plan de adopción por fases
 
-1. **Fase 2a (Capa 1, sin ML pesado)**: reglas + gazetteer + `fastembed` para alias.
-2. **Fase 2b**: añadir GLiNER (`gline-rs`/`ort`) para NER preciso.
+1. **Fase 2a (Capa 1, sin ML pesado)**: reglas + gazetteer + `fastembed` para alias. ✅
+2. **Fase 2b**: añadir GLiNER2 (`gliner2-rs`) para NER preciso. ✅
 3. **Fase 2c (opcional)**: `mistral.rs` + Qwen3-1.7B para coreferencia y relaciones profundas.
 4. **Fase 5**: si el usuario lo desea, ampliar a Qwen3-4B/8B o modelos específicos.
 

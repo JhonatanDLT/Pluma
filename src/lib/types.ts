@@ -71,17 +71,33 @@ export interface Relationship {
 export interface AnalysisReport {
   characters: Character[];
   relationships: Relationship[];
+  entities: Entity[];
+}
+
+export interface Entity {
+  id: string;
+  project_id: string;
+  name: string;
+  entity_type: string;
+  aliases: string[];
+  description: string | null;
+  mention_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface IaSettings {
   ner_engine: string;
   embeddings: boolean;
   llm_model: string | null;
+  keep_loaded: boolean;
 }
 
 export interface IaStatus {
   settings: IaSettings;
   embeddings_cached: boolean;
+  gliner_cached: boolean;
+  onnxruntime_available: boolean;
   ollama_available: boolean;
 }
 

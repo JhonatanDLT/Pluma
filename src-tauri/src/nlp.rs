@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use strsim::normalized_levenshtein;
 
-use crate::engines::Embedder;
+use crate::engines::{Embedder, NerEngine};
 
 /// Personaje detectado.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,20 +29,99 @@ pub struct DetectedRelationship {
     pub kind: Option<String>,
 }
 
-/// Analiza un conjunto de textos (escenas) y devuelve personajes y relaciones.
-pub fn analyze<E: Embedder + ?Sized>(
+/// Entidad no humana detectada (lugar, facción/organización, …).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectedEntity {
+    pub name: String,
+    /// `location` (ciudades/lugares) o `faction` (facciones/organizaciones).
+    pub entity_type: String,
+    pub aliases: Vec<String>,
+    pub mention_count: usize,
+    pub description: String,
+}
+
+/// Resultado completo del análisis narrativo.
+pub struct AnalysisResult {
+    pub characters: Vec<DetectedCharacter>,
+    pub relationships: Vec<DetectedRelationship>,
+    pub entities: Vec<DetectedEntity>,
+}
+
+/// Analiza un conjunto de textos (escenas) usando únicamente reglas locales.
+/// Es el camino por defecto: no requiere descargar ningún modelo.
+pub fn analyze<E: Embedder + ?Sized>(texts: &[String], embedder: Option<&mut E>) -> AnalysisResult {
+    let mut mentions: Vec<(usize, String)> = Vec::new();
+    for (scene_idx, text) in texts.iter().enumerate() {
+        for name in extract_candidates(text) {
+            mentions.push((scene_idx, name));
+        }
+    }
+    let (characters, relationships) = build_report(texts, &mentions, embedder);
+    AnalysisResult {
+        characters,
+        relationships,
+        entities: Vec::new(),
+    }
+}
+
+/// Analiza combinando un motor NER externo (por ejemplo GLiNER2) con las reglas
+/// locales: los candidatos de ambos orígenes se fusionan antes de agrupar alias.
+/// Si el motor falla, se continúa silenciosamente con las reglas.
+pub fn analyze_with_ner<E: Embedder + ?Sized, N: NerEngine + ?Sized>(
     texts: &[String],
+    ner: &mut N,
+    embedder: Option<&mut E>,
+) -> AnalysisResult {
+    let mut person_mentions: Vec<(usize, String)> = Vec::new();
+    let mut location_mentions: Vec<(usize, String)> = Vec::new();
+    let mut faction_mentions: Vec<(usize, String)> = Vec::new();
+
+    for (scene_idx, text) in texts.iter().enumerate() {
+        if let Ok(mentions) = ner.extract(text) {
+            for mention in mentions {
+                let bucket = match mention.label.as_str() {
+                    "person" => &mut person_mentions,
+                    "location" => &mut location_mentions,
+                    "organization" => &mut faction_mentions,
+                    _ => continue,
+                };
+                bucket.push((scene_idx, mention.text));
+            }
+        }
+        for name in extract_candidates(text) {
+            person_mentions.push((scene_idx, name));
+        }
+    }
+
+    let (characters, relationships) = build_report(texts, &person_mentions, embedder);
+
+    let mut entities = Vec::new();
+    entities.extend(build_entities(texts, &location_mentions, "location"));
+    entities.extend(build_entities(texts, &faction_mentions, "faction"));
+
+    AnalysisResult {
+        characters,
+        relationships,
+        entities,
+    }
+}
+
+/// Construye personajes y relaciones a partir de menciones `(índice de escena, nombre)`.
+fn build_report<E: Embedder + ?Sized>(
+    texts: &[String],
+    mentions: &[(usize, String)],
     embedder: Option<&mut E>,
 ) -> (Vec<DetectedCharacter>, Vec<DetectedRelationship>) {
     // Frecuencia de cada candidato y escenas en las que aparece.
     let mut counts: HashMap<String, usize> = HashMap::new();
     let mut scenes_by_name: HashMap<String, HashSet<usize>> = HashMap::new();
 
-    for (scene_idx, text) in texts.iter().enumerate() {
-        for name in extract_candidates(text) {
-            *counts.entry(name.clone()).or_insert(0) += 1;
-            scenes_by_name.entry(name).or_default().insert(scene_idx);
-        }
+    for (scene_idx, name) in mentions {
+        *counts.entry(name.clone()).or_insert(0) += 1;
+        scenes_by_name
+            .entry(name.clone())
+            .or_default()
+            .insert(*scene_idx);
     }
 
     // Filtra por frecuencia mínima (evita ruido).
@@ -139,6 +218,52 @@ pub fn analyze<E: Embedder + ?Sized>(
     }
 
     (characters, relationships)
+}
+
+/// Construye entidades (lugares/facciones) a partir de menciones, reutilizando la
+/// agrupación de alias y la extracción de descripción de los personajes.
+fn build_entities(
+    texts: &[String],
+    mentions: &[(usize, String)],
+    entity_type: &str,
+) -> Vec<DetectedEntity> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut scenes_by_name: HashMap<String, HashSet<usize>> = HashMap::new();
+    for (scene_idx, name) in mentions {
+        *counts.entry(name.clone()).or_insert(0) += 1;
+        scenes_by_name
+            .entry(name.clone())
+            .or_default()
+            .insert(*scene_idx);
+    }
+
+    let mut names: Vec<String> = counts
+        .into_iter()
+        .filter(|(_, count)| *count >= 2)
+        .map(|(name, _)| name)
+        .collect();
+    names.sort();
+
+    let mut entities: Vec<DetectedEntity> = cluster_aliases(&names)
+        .into_iter()
+        .map(|cluster| {
+            let mention_count = cluster
+                .iter()
+                .map(|name| scenes_by_name.get(name).map(|s| s.len()).unwrap_or(0))
+                .sum();
+            let description = extract_description(&cluster, texts);
+            DetectedEntity {
+                name: cluster[0].clone(),
+                entity_type: entity_type.to_string(),
+                aliases: cluster[1..].to_vec(),
+                mention_count,
+                description,
+            }
+        })
+        .collect();
+
+    entities.sort_by(|a, b| b.mention_count.cmp(&a.mention_count));
+    entities
 }
 
 /// Extrae candidatos a nombre propio (palabra en mayúscula, no a inicio de frase).
@@ -478,11 +603,12 @@ mod tests {
             "La casa de Ana estaba cerca de Pedro.".to_string(),
             "La casa de Pedro estaba cerca de Ana.".to_string(),
         ];
-        let (characters, relationships) = analyze::<crate::engines::FastEmbedder>(&texts, None);
-        assert!(characters.iter().any(|c| c.name == "Ana"));
-        assert!(characters.iter().any(|c| c.name == "Pedro"));
+        let result = analyze::<crate::engines::FastEmbedder>(&texts, None);
+        assert!(result.characters.iter().any(|c| c.name == "Ana"));
+        assert!(result.characters.iter().any(|c| c.name == "Pedro"));
         assert!(
-            relationships
+            result
+                .relationships
                 .iter()
                 .any(|r| { (r.a == "Ana" && r.b == "Pedro") || (r.a == "Pedro" && r.b == "Ana") })
         );
@@ -495,5 +621,22 @@ mod tests {
 
         let shared = vec!["Pedro amaba a Ana en secreto."];
         assert_eq!(infer_relationship_type(&shared), Some("romance"));
+    }
+
+    #[test]
+    fn builds_entities_from_mentions() {
+        let texts = vec![
+            "Viajaron a Roma y se quedaron en Roma.".to_string(),
+            "Roma era hermosa en primavera.".to_string(),
+        ];
+        let mentions = vec![
+            (0, "Roma".to_string()),
+            (0, "Roma".to_string()),
+            (1, "Roma".to_string()),
+        ];
+        let entities = build_entities(&texts, &mentions, "location");
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].name, "Roma");
+        assert_eq!(entities[0].entity_type, "location");
     }
 }

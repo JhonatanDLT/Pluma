@@ -52,6 +52,19 @@ pub fn context_for(name: &str, texts: &[String]) -> String {
     out.chars().take(6000).collect()
 }
 
+/// Corrige gramática, ortografía y puntuación de un fragmento literario.
+/// Devuelve únicamente el texto corregido (sin comentarios ni envoltorios).
+pub fn correct_grammar(model: &str, text: &str) -> Result<String> {
+    let text = truncate(text, 8000);
+    let prompt = format!(
+        "Corrige la gramática, la ortografía y la puntuación del siguiente texto \
+         literario. Conserva el estilo, el vocabulario y el significado originales; \
+         no reescribas ni añadas contenido. Responde únicamente con el texto \
+         corregido, sin comentarios ni comillas.\n\n{text}"
+    );
+    generate(model, &prompt)
+}
+
 fn truncate(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }

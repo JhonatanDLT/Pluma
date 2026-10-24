@@ -158,9 +158,42 @@ pub struct Relationship {
     pub description: Option<String>,
 }
 
-/// Resultado del análisis narrativo (personajes y relaciones).
+/// Entidad no humana detectada por el análisis (lugar, facción, …).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Entity {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    /// `location` (ciudades/lugares) o `faction` (facciones/organizaciones).
+    pub entity_type: String,
+    pub aliases: Vec<String>,
+    pub description: Option<String>,
+    pub mention_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl Entity {
+    pub fn new(project_id: impl Into<String>, name: impl Into<String>, entity_type: &str) -> Self {
+        let ts = now();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: project_id.into(),
+            name: name.into(),
+            entity_type: entity_type.to_string(),
+            aliases: Vec::new(),
+            description: None,
+            mention_count: 0,
+            created_at: ts.clone(),
+            updated_at: ts,
+        }
+    }
+}
+
+/// Resultado del análisis narrativo (personajes, relaciones y entidades).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisReport {
     pub characters: Vec<Character>,
     pub relationships: Vec<Relationship>,
+    pub entities: Vec<Entity>,
 }

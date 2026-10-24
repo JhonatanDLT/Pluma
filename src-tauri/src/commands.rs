@@ -551,8 +551,33 @@ pub fn enrich_project(
 /// Corrige gramática, ortografía y puntuación con un LLM local (Ollama).
 #[tauri::command]
 pub fn correct_text(text: String, model: Option<String>) -> Result<String> {
-    let model = model.unwrap_or_else(|| llm::DEFAULT_MODEL.to_string());
+    let model = model.unwrap_or_else(|| llm::GRAMMAR_MODEL.to_string());
     llm::correct_grammar(&model, &text)
+}
+
+/// Conversa con el LLM local (Ollama) como asistente de escritura.
+#[tauri::command]
+pub fn chat(message: String, model: Option<String>) -> Result<String> {
+    let model = model.unwrap_or_else(|| llm::DEFAULT_MODEL.to_string());
+    llm::chat(&model, &message)
+}
+
+/// Revisa la ortografía de un texto (Hunspell, sin LLM).
+#[tauri::command]
+pub fn spell_check(app: tauri::AppHandle, text: String) -> Result<crate::spell::SpellReport> {
+    crate::spell::check(&data_dir(&app)?, &text)
+}
+
+/// Descarga e instala el diccionario Hunspell de un idioma.
+#[tauri::command]
+pub fn spell_install(app: tauri::AppHandle, code: String) -> Result<()> {
+    crate::spell::install(&data_dir(&app)?, &code)
+}
+
+/// Lista los idiomas soportados y cuáles están instalados.
+#[tauri::command]
+pub fn spell_languages(app: tauri::AppHandle) -> Result<Vec<crate::spell::LanguageInfo>> {
+    Ok(crate::spell::languages(&data_dir(&app)?))
 }
 
 // ---------------------------------------------------------------------------

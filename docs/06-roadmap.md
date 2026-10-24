@@ -94,6 +94,9 @@ se genera una ficha con relaciones sugeridas. ✅
 - [x] **Análisis en segundo plano** (asíncrono) con barra de progreso, acotado al capítulo en curso y solo para capítulos 'Revisado'/'Final'.
 - [x] **Configuración de proyecto** (nombre, objetivo, resumen, portada) al crear/importar.
 - [x] **Niveles configurables**: etiquetas renombrables de la jerarquía (p. ej. «Volúmenes»/«Capítulos») y ocultación automática del segundo nivel cuando no hay subdivisión de escenas.
+- [x] **UI/UX**: panel derecho ligero (asistente/minibot + metadatos/versiones/ajustes) y **World Building** como vista dedicada con registro de cambios.
+- [x] **Análisis mejorado**: deduplicación por títulos/apodos y tipado de relaciones por co-localización de oraciones.
+- [x] **Ortografía multilingüe**: Hunspell (`spellbook`) + detección de idioma (`whatlang`) con diccionarios descargables; gramática con modelo ligero dedicado (Ollama 0.5B).
 - [ ] TTS neuronal local (Piper) y voces por personaje.
 - [ ] Test de ida y vuelta EPUB (exportar → importar y verificar capítulos).
 - [ ] Ampliar el clasificador de estructura: encabezados centrados y numeración `1.` / `1)`.

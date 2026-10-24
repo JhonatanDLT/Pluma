@@ -76,20 +76,28 @@ pub fn collect_mentions(
     let total = texts.len();
 
     for (scene_idx, text) in texts.iter().enumerate() {
-        if let Some(ner) = ner.as_deref_mut() {
-            if let Ok(found) = ner.extract(text) {
-                for mention in found {
-                    match mention.label.as_str() {
-                        "person" => mentions.person.push((scene_idx, mention.text)),
-                        "location" => mentions.location.push((scene_idx, mention.text)),
-                        "organization" => mentions.faction.push((scene_idx, mention.text)),
-                        _ => {}
+        match ner.as_deref_mut() {
+            // Con NER activo (GLiNER2) no se ejecutan las reglas locales: evita
+            // menciones duplicadas que fragmentan a un mismo personaje en varios
+            // ("Ana María" vs "Ana" + "María") y reduce el trabajo a la mitad.
+            Some(ner) => {
+                if let Ok(found) = ner.extract(text) {
+                    for mention in found {
+                        match mention.label.as_str() {
+                            "person" => mentions.person.push((scene_idx, mention.text)),
+                            "location" => mentions.location.push((scene_idx, mention.text)),
+                            "organization" => mentions.faction.push((scene_idx, mention.text)),
+                            _ => {}
+                        }
                     }
                 }
             }
-        }
-        for name in extract_candidates(text) {
-            mentions.person.push((scene_idx, name));
+            // Sin NER: las reglas locales extraen candidatos a nombre propio.
+            None => {
+                for name in extract_candidates(text) {
+                    mentions.person.push((scene_idx, name));
+                }
+            }
         }
         on_scene(scene_idx + 1, total);
     }
@@ -123,12 +131,12 @@ fn build_report<E: Embedder + ?Sized>(
     mentions: &[(usize, String)],
     embedder: Option<&mut E>,
 ) -> (Vec<DetectedCharacter>, Vec<DetectedRelationship>) {
-    // Frecuencia de cada candidato y escenas en las que aparece.
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    // Frecuencia de menciones y escenas por cada forma superficial del nombre.
+    let mut mention_counts: HashMap<String, usize> = HashMap::new();
     let mut scenes_by_name: HashMap<String, HashSet<usize>> = HashMap::new();
 
     for (scene_idx, name) in mentions {
-        *counts.entry(name.clone()).or_insert(0) += 1;
+        *mention_counts.entry(name.clone()).or_insert(0) += 1;
         scenes_by_name
             .entry(name.clone())
             .or_default()
@@ -136,57 +144,73 @@ fn build_report<E: Embedder + ?Sized>(
     }
 
     // Filtra por frecuencia mínima (evita ruido).
-    let mut names: Vec<String> = counts
-        .into_iter()
-        .filter(|(_, count)| *count >= 2)
-        .map(|(name, _)| name)
+    let mut names: Vec<String> = mention_counts
+        .iter()
+        .filter(|(_, count)| **count >= 2)
+        .map(|(name, _)| name.clone())
         .collect();
     names.sort();
 
-    // Agrupa alias (similitud de cadenas).
+    // Agrupa alias (similitud de cadenas) y fusiona por semántica si hay embedder.
     let mut clusters = cluster_aliases(&names);
-
-    // Mejora opcional: fusiona alias por similitud semántica de sus descripciones.
     if let Some(embedder) = embedder {
         clusters = merge_by_semantics(clusters, texts, embedder);
     }
 
-    // Construye personajes (unión de escenas y menciones de todos sus alias).
-    let mut characters: Vec<DetectedCharacter> = clusters
-        .into_iter()
-        .map(|cluster| {
-            let mut mention_count = 0usize;
-            let mut all_scenes: HashSet<usize> = HashSet::new();
-            for name in &cluster {
-                mention_count += scenes_by_name.get(name).map(|s| s.len()).unwrap_or(0);
-                if let Some(s) = scenes_by_name.get(name) {
-                    all_scenes.extend(s.iter().copied());
-                }
+    // Construye personajes. El nombre canónico es el alias más frecuente (no el
+    // primero alfabéticamente), y sus escenas son la unión de las de todos sus alias.
+    let mut characters: Vec<DetectedCharacter> = Vec::new();
+    let mut scenes_by_character: HashMap<String, HashSet<usize>> = HashMap::new();
+    for cluster in clusters {
+        let mut sorted = cluster.clone();
+        sorted.sort_by(|a, b| {
+            mention_counts
+                .get(b)
+                .unwrap_or(&0)
+                .cmp(mention_counts.get(a).unwrap_or(&0))
+        });
+        let canonical = sorted[0].clone();
+        let aliases: Vec<String> = sorted[1..].to_vec();
+
+        let mut mention_count = 0usize;
+        let mut all_scenes: HashSet<usize> = HashSet::new();
+        for name in &cluster {
+            mention_count += mention_counts.get(name).copied().unwrap_or(0);
+            if let Some(s) = scenes_by_name.get(name) {
+                all_scenes.extend(s.iter().copied());
             }
-            let description = extract_description(&cluster, texts);
-            DetectedCharacter {
-                name: cluster[0].clone(),
-                aliases: cluster[1..].to_vec(),
-                role: String::new(),
-                mention_count,
-                description,
-            }
-        })
-        .collect();
+        }
+        let description = extract_description(&cluster, texts);
+
+        scenes_by_character.insert(canonical.clone(), all_scenes);
+        characters.push(DetectedCharacter {
+            name: canonical,
+            aliases,
+            role: String::new(),
+            mention_count,
+            description,
+        });
+    }
 
     characters.sort_by(|a, b| b.mention_count.cmp(&a.mention_count));
     for (i, c) in characters.iter_mut().enumerate() {
         c.role = if i == 0 { "protagonista" } else { "secundario" }.to_string();
     }
 
-    // Relaciones por co-ocurrencia + tipo inferido.
+    // Relaciones por co-ocurrencia + tipo inferido a nivel de oración.
     let mut relationships: Vec<DetectedRelationship> = Vec::new();
     for i in 0..characters.len() {
         for j in (i + 1)..characters.len() {
             let a = &characters[i];
             let b = &characters[j];
-            let scenes_a = scenes_by_name.get(&a.name).cloned().unwrap_or_default();
-            let scenes_b = scenes_by_name.get(&b.name).cloned().unwrap_or_default();
+            let scenes_a = scenes_by_character
+                .get(&a.name)
+                .cloned()
+                .unwrap_or_default();
+            let scenes_b = scenes_by_character
+                .get(&b.name)
+                .cloned()
+                .unwrap_or_default();
             let shared: Vec<usize> = scenes_a.intersection(&scenes_b).copied().collect();
             if shared.is_empty() {
                 continue;
@@ -196,7 +220,15 @@ fn build_report<E: Embedder + ?Sized>(
                 .iter()
                 .filter_map(|&idx| texts.get(idx).map(|t| t.as_str()))
                 .collect();
-            let kind = infer_relationship_type(&shared_texts).map(str::to_string);
+
+            // Nombres completos (canónico + alias) para la co-localización.
+            let names_a = std::iter::once(a.name.clone())
+                .chain(a.aliases.iter().cloned())
+                .collect::<Vec<_>>();
+            let names_b = std::iter::once(b.name.clone())
+                .chain(b.aliases.iter().cloned())
+                .collect::<Vec<_>>();
+            let kind = infer_relationship_type(&names_a, &names_b, &shared_texts);
 
             relationships.push(DetectedRelationship {
                 a: a.name.clone(),
@@ -432,13 +464,93 @@ fn cluster_aliases(names: &[String]) -> Vec<Vec<String>> {
     clusters
 }
 
+/// Títulos, tratamientos y artículos que no identifican por sí solos a un
+/// personaje («Lord Sterling» → «Sterling»). Se omiten al comparar nombres.
+const HONORIFICS: &[&str] = &[
+    "el",
+    "la",
+    "los",
+    "las",
+    "un",
+    "una",
+    "unos",
+    "unas",
+    "de",
+    "del",
+    "y",
+    "e",
+    "don",
+    "doña",
+    "señor",
+    "señora",
+    "señorita",
+    "lord",
+    "lady",
+    "sir",
+    "doctor",
+    "doctora",
+    "conde",
+    "condesa",
+    "duque",
+    "duquesa",
+    "marqués",
+    "marquesa",
+    "rey",
+    "reina",
+    "príncipe",
+    "princesa",
+    "capitán",
+    "capitana",
+    "coronel",
+    "sargento",
+    "profesor",
+    "profesora",
+    "monsieur",
+    "madame",
+    "santo",
+    "santa",
+    "san",
+];
+
+/// Tokens significativos de un nombre: sin títulos/tratamientos, en minúsculas.
+fn significant_tokens(name: &str) -> Vec<String> {
+    name.split_whitespace()
+        .map(|t| t.trim_matches(|c: char| !c.is_alphabetic()).to_lowercase())
+        .filter(|t| t.chars().count() >= 2 && !HONORIFICS.contains(&t.as_str()))
+        .collect()
+}
+
+/// `true` si `needle` aparece como subsecuencia contigua dentro de `haystack`.
+fn is_contiguous_subsequence(needle: &[String], haystack: &[String]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Decide si dos formas superficiales se refieren al mismo personaje.
 fn is_same_character(a: &str, b: &str) -> bool {
-    let first_token = |s: &str| s.split_whitespace().next().unwrap_or(s).to_lowercase();
-    let same_first = first_token(a) == first_token(b);
-    let contains = a.to_lowercase().contains(&b.to_lowercase())
-        || b.to_lowercase().contains(&a.to_lowercase());
-    let similar = normalized_levenshtein(&a.to_lowercase(), &b.to_lowercase()) > 0.75;
-    same_first && (contains || similar)
+    let na = a.to_lowercase();
+    let nb = b.to_lowercase();
+    if na == nb {
+        return true;
+    }
+    // Variaciones tipográficas (acentos, letras intercambiadas).
+    if normalized_levenshtein(&na, &nb) > 0.8 {
+        return true;
+    }
+
+    let ta = significant_tokens(a);
+    let tb = significant_tokens(b);
+    if ta.is_empty() || tb.is_empty() {
+        return false;
+    }
+    // Un nombre es una forma corta del otro («Sterling» ⊂ «Lord Sterling»).
+    if is_contiguous_subsequence(&ta, &tb) || is_contiguous_subsequence(&tb, &ta) {
+        return true;
+    }
+    // Comparten apellido (último token) y uno de los dos es monopalabra.
+    ta.last() == tb.last() && (ta.len() == 1 || tb.len() == 1)
 }
 
 /// Fusiona grupos cuyas descripciones son semánticamente similares (embeddings).
@@ -510,7 +622,16 @@ fn split_sentences(text: &str) -> Vec<&str> {
 }
 
 /// Infiere el tipo de relación a partir de marcadores lingüísticos.
-fn infer_relationship_type(shared_texts: &[&str]) -> Option<&'static str> {
+///
+/// A diferencia de la versión anterior, solo considera las **oraciones donde
+/// ambos personajes aparecen**, y elige el tipo con más evidencia en lugar de
+/// devolver «familia» ante el primer marcador (que aparecía con mucha frecuencia
+/// en textos largos y dominaba el resultado).
+fn infer_relationship_type(
+    names_a: &[String],
+    names_b: &[String],
+    shared_texts: &[&str],
+) -> Option<String> {
     const FAMILY: &[&str] = &[
         "hermano",
         "hermana",
@@ -528,6 +649,12 @@ fn infer_relationship_type(shared_texts: &[&str]) -> Option<&'static str> {
         "sobrina",
         "madrastra",
         "padrastro",
+        "esposo",
+        "esposa",
+        "marido",
+        "mujer",
+        "cuñado",
+        "cuñada",
     ];
     const ROMANCE: &[&str] = &[
         "amaba",
@@ -536,12 +663,13 @@ fn infer_relationship_type(shared_texts: &[&str]) -> Option<&'static str> {
         "enamorada",
         "beso",
         "besó",
+        "besaba",
         "pareja",
-        "esposo",
-        "esposa",
         "novio",
         "novia",
         "amantes",
+        "acarici",
+        "abraz",
     ];
     const RIVALRY: &[&str] = &[
         "odiaba",
@@ -550,28 +678,56 @@ fn infer_relationship_type(shared_texts: &[&str]) -> Option<&'static str> {
         "enemiga",
         "rival",
         "enfrentó",
+        "enfrenta",
         "traicionó",
+        "traición",
         "venganza",
         "desprecio",
+        "duelo",
+        "desafió",
     ];
-    const FRIENDSHIP: &[&str] = &["amigo", "amiga", "amistad", "compañero", "compañera"];
+    const FRIENDSHIP: &[&str] = &[
+        "amigo",
+        "amiga",
+        "amistad",
+        "compañero",
+        "compañera",
+        "camarada",
+        "aliado",
+        "aliada",
+    ];
 
+    let la: Vec<String> = names_a.iter().map(|n| n.to_lowercase()).collect();
+    let lb: Vec<String> = names_b.iter().map(|n| n.to_lowercase()).collect();
+
+    let mut scores: HashMap<&'static str, usize> = HashMap::new();
     for text in shared_texts {
-        let lower = text.to_lowercase();
-        if FAMILY.iter().any(|&m| lower.contains(m)) {
-            return Some("familia");
-        }
-        if ROMANCE.iter().any(|&m| lower.contains(m)) {
-            return Some("romance");
-        }
-        if RIVALRY.iter().any(|&m| lower.contains(m)) {
-            return Some("rivalidad");
-        }
-        if FRIENDSHIP.iter().any(|&m| lower.contains(m)) {
-            return Some("amistad");
+        for sentence in split_sentences(text) {
+            let lower = sentence.to_lowercase();
+            let has_a = la.iter().any(|n| lower.contains(n));
+            let has_b = lb.iter().any(|n| lower.contains(n));
+            if !has_a || !has_b {
+                continue;
+            }
+            if FAMILY.iter().any(|&m| lower.contains(m)) {
+                *scores.entry("familia").or_insert(0) += 1;
+            }
+            if ROMANCE.iter().any(|&m| lower.contains(m)) {
+                *scores.entry("romance").or_insert(0) += 1;
+            }
+            if RIVALRY.iter().any(|&m| lower.contains(m)) {
+                *scores.entry("rivalidad").or_insert(0) += 1;
+            }
+            if FRIENDSHIP.iter().any(|&m| lower.contains(m)) {
+                *scores.entry("amistad").or_insert(0) += 1;
+            }
         }
     }
-    None
+
+    scores
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(kind, _)| kind.to_string())
 }
 
 #[cfg(test)]
@@ -609,6 +765,31 @@ mod tests {
     }
 
     #[test]
+    fn clusters_titles_and_apodos() {
+        let names = vec![
+            "Lord Sterling".to_string(),
+            "Sterling".to_string(),
+            "Ana".to_string(),
+        ];
+        let clusters = cluster_aliases(&names);
+        assert_eq!(clusters.len(), 2);
+        let sterling = clusters
+            .iter()
+            .find(|c| c.contains(&"Lord Sterling".to_string()))
+            .unwrap();
+        assert!(sterling.contains(&"Sterling".to_string()));
+    }
+
+    #[test]
+    fn relationships_only_when_both_names_co_occur() {
+        // "hermano" aparece, pero no en la misma oración que ambos personajes.
+        let a = vec!["Ana".to_string()];
+        let b = vec!["Pedro".to_string()];
+        let shared = vec!["Ana estaba sola. Pedro tenía un hermano."];
+        assert_eq!(infer_relationship_type(&a, &b, &shared), None);
+    }
+
+    #[test]
     fn analysis_detects_relationships() {
         let texts = vec![
             "La casa de Ana estaba cerca de Pedro.".to_string(),
@@ -627,11 +808,20 @@ mod tests {
 
     #[test]
     fn infers_relationship_type() {
+        let a = vec!["Ana".to_string()];
+        let b = vec!["Pedro".to_string()];
+
         let shared = vec!["Ana era la hermana de Pedro."];
-        assert_eq!(infer_relationship_type(&shared), Some("familia"));
+        assert_eq!(
+            infer_relationship_type(&a, &b, &shared),
+            Some("familia".to_string())
+        );
 
         let shared = vec!["Pedro amaba a Ana en secreto."];
-        assert_eq!(infer_relationship_type(&shared), Some("romance"));
+        assert_eq!(
+            infer_relationship_type(&a, &b, &shared),
+            Some("romance".to_string())
+        );
     }
 
     #[test]

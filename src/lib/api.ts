@@ -6,12 +6,14 @@ import type {
   Entity,
   IaSettings,
   IaStatus,
+  LanguageInfo,
   NavEntry,
   Project,
   Relationship,
   Scene,
   SceneMeta,
   SnapshotMeta,
+  SpellReport,
 } from "./types";
 
 // Proyectos
@@ -129,6 +131,16 @@ export const enrichProject = (projectId: string, model: string | null) =>
   invoke<Character[]>("enrich_project", { projectId, model });
 export const correctText = (text: string, model: string | null) =>
   invoke<string>("correct_text", { text, model });
+export const chat = (message: string, model: string | null) =>
+  invoke<string>("chat", { message, model });
+
+// Ortografía (Hunspell, sin LLM)
+export const spellCheck = (text: string) =>
+  invoke<SpellReport>("spell_check", { text });
+export const spellInstall = (code: string) =>
+  invoke<void>("spell_install", { code });
+export const spellLanguages = () =>
+  invoke<LanguageInfo[]>("spell_languages");
 
 // Versiones (snapshots)
 export const createSnapshot = (projectId: string, message: string | null) =>

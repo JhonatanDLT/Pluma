@@ -11,6 +11,7 @@ mod parser;
 mod repo;
 mod runtime;
 mod settings;
+mod spell;
 mod structure;
 mod tts;
 
@@ -77,6 +78,10 @@ pub fn run() {
             commands::analyze_project,
             commands::enrich_project,
             commands::correct_text,
+            commands::chat,
+            commands::spell_check,
+            commands::spell_install,
+            commands::spell_languages,
             commands::create_snapshot,
             commands::list_snapshots,
             commands::restore_snapshot,

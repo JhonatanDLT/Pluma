@@ -40,6 +40,8 @@ ureq = "2"
 tar = "0.4"
 flate2 = "1"
 sha2 = "0.10"
+spellbook = "0.4"
+whatlang = "0.18"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

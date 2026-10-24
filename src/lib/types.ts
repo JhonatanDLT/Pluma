@@ -122,3 +122,26 @@ export interface IaStatus {
 
 export type EditorMode = "wysiwyg" | "source";
 export type SaveState = "idle" | "saving" | "saved" | "error";
+
+export interface ChangeEntry {
+  time: string;
+  summary: string;
+}
+
+export interface SpellIssue {
+  word: string;
+  suggestions: string[];
+}
+
+export interface SpellReport {
+  language: string;
+  language_name: string;
+  installed: boolean;
+  issues: SpellIssue[];
+}
+
+export interface LanguageInfo {
+  code: string;
+  name: string;
+  installed: boolean;
+}

@@ -1,14 +1,10 @@
 <script lang="ts">
+  import AssistantPanel from "$lib/components/AssistantPanel.svelte";
   import MetadataPanel from "$lib/components/MetadataPanel.svelte";
-  import CharactersPanel from "$lib/components/CharactersPanel.svelte";
   import VersionsPanel from "$lib/components/VersionsPanel.svelte";
   import type {
     Chapter,
-    Character,
-    Entity,
-    IaStatus,
     Project,
-    Relationship,
     Scene,
     SnapshotMeta,
   } from "$lib/types";
@@ -20,23 +16,8 @@
     onsavechapter,
     onsavescene,
     onupdatelevels,
-    characters,
-    relationships,
-    entities,
-    analyzing,
-    enriching,
-    progress,
-    iaStatus,
-    onanalyze,
-    onenrich,
-    ondeletecharacter,
-    ondeleteentity,
-    onupdateembeddings,
-    oninstallembeddings,
-    onupdatenerengine,
-    oninstallgliner,
-    oninstallonnxruntime,
-    onupdatekeeploaded,
+    ollamaAvailable,
+    onchat,
     snapshots,
     snapshotBusy,
     oncreatesnapshot,
@@ -56,23 +37,8 @@
       summary: string | null;
     }) => void;
     onupdatelevels: (level1Name: string, level2Name: string) => void;
-    characters: Character[];
-    relationships: Relationship[];
-    entities: Entity[];
-    analyzing: boolean;
-    enriching: boolean;
-    progress: { done: number; total: number; phase: string } | null;
-    iaStatus: IaStatus | null;
-    onanalyze: () => void;
-    onenrich: () => void;
-    ondeletecharacter: (id: string) => void;
-    ondeleteentity: (id: string) => void;
-    onupdateembeddings: (enabled: boolean) => void;
-    oninstallembeddings: () => void;
-    onupdatenerengine: (engine: string) => void;
-    oninstallgliner: () => void;
-    oninstallonnxruntime: () => void;
-    onupdatekeeploaded: (enabled: boolean) => void;
+    ollamaAvailable: boolean;
+    onchat: (message: string) => Promise<string>;
     snapshots: SnapshotMeta[];
     snapshotBusy: boolean;
     oncreatesnapshot: (message: string | null) => void;
@@ -81,8 +47,8 @@
     onloadsnapshots: () => void;
   } = $props();
 
-  type Tab = "chars" | "meta" | "versions" | "settings";
-  let tab = $state<Tab>("chars");
+  type Tab = "assistant" | "meta" | "versions" | "settings";
+  let tab = $state<Tab>("assistant");
 
   let level1Name = $state("");
   let level2Name = $state("");
@@ -108,33 +74,15 @@
 
 <div class="options-panel">
   <div class="tabs">
-    <button class="tab" class:active={tab === "chars"} onclick={() => (tab = "chars")}>Personajes</button>
+    <button class="tab" class:active={tab === "assistant"} onclick={() => (tab = "assistant")}>Asistente</button>
     <button class="tab" class:active={tab === "meta"} onclick={() => (tab = "meta")}>Metadatos</button>
     <button class="tab" class:active={tab === "versions"} onclick={() => (tab = "versions")}>Versiones</button>
     <button class="tab" class:active={tab === "settings"} onclick={() => (tab = "settings")}>Ajustes</button>
   </div>
 
   <div class="tab-body">
-    {#if tab === "chars"}
-      <CharactersPanel
-        {characters}
-        {relationships}
-        {entities}
-        {analyzing}
-        {enriching}
-        {progress}
-        {iaStatus}
-        onanalyze={onanalyze}
-        onenrich={onenrich}
-        ondeletecharacter={ondeletecharacter}
-        ondeleteentity={ondeleteentity}
-        onupdateembeddings={onupdateembeddings}
-        oninstallembeddings={oninstallembeddings}
-        onupdatenerengine={onupdatenerengine}
-        oninstallgliner={oninstallgliner}
-        oninstallonnxruntime={oninstallonnxruntime}
-        onupdatekeeploaded={onupdatekeeploaded}
-      />
+    {#if tab === "assistant"}
+      <AssistantPanel {ollamaAvailable} {onchat} />
     {:else if tab === "meta"}
       <MetadataPanel
         {chapter}
@@ -193,12 +141,13 @@
     flex: 1;
     font: inherit;
     font-size: 12px;
-    padding: 7px 4px;
+    padding: 7px 2px;
     border: none;
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    white-space: nowrap;
   }
 
   .tab.active {

@@ -6,11 +6,14 @@
   import Editor from "$lib/components/Editor.svelte";
   import SourceEditor from "$lib/components/SourceEditor.svelte";
   import OptionsPanel from "$lib/components/OptionsPanel.svelte";
+  import WorldBuilding from "$lib/components/WorldBuilding.svelte";
+  import SpellPanel from "$lib/components/SpellPanel.svelte";
   import QuickSwitcher from "$lib/components/QuickSwitcher.svelte";
   import * as api from "$lib/api";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { listen } from "@tauri-apps/api/event";
   import type {
+    ChangeEntry,
     Chapter,
     Character,
     EditorMode,
@@ -23,6 +26,7 @@
     Scene,
     SceneMeta,
     SnapshotMeta,
+    SpellReport,
   } from "$lib/types";
 
   let projects = $state<Project[]>([]);
@@ -55,6 +59,11 @@
   let navigation = $state<NavEntry[]>([]);
   let switcherOpen = $state(false);
   let exportOpen = $state(false);
+  let worldOpen = $state(false);
+  let changeLog = $state<ChangeEntry[]>([]);
+  let spellOpen = $state(false);
+  let spellReport = $state<SpellReport | null>(null);
+  let spellBusy = $state(false);
 
   // Paneles redimensionables / colapsables (persistidos entre sesiones).
   function loadNum(key: string, fallback: number): number {
@@ -97,6 +106,7 @@
     chapters.find((c) => c.id === selectedChapterId) ?? null,
   );
   const wordCount = $derived(countWords(sceneContent));
+  const ollamaAvailable = $derived(iaStatus?.ollama_available ?? false);
 
   // El segundo nivel (escenas) solo se considera "en uso" cuando al menos un
   // capítulo tiene más de una escena. Así, novelas de un único nivel (p. ej.
@@ -628,11 +638,23 @@
     if (!selectedProjectId) return;
     analyzing = true;
     analyzeProgress = { done: 0, total: 0, phase: "escenas" };
+    const before = new Set(characters.map((c) => c.name));
     try {
       const report = await api.analyzeProject(selectedProjectId, selectedChapterId);
       characters = report.characters;
       relationships = report.relationships;
       entities = report.entities;
+
+      const added = report.characters.filter((c) => !before.has(c.name)).length;
+      const removed = [...before].filter(
+        (n) => !report.characters.some((c) => c.name === n),
+      ).length;
+      const parts: string[] = [];
+      if (added) parts.push(`+${added} personajes`);
+      if (removed) parts.push(`-${removed} personajes`);
+      parts.push(`${report.relationships.length} relaciones`);
+      parts.push(`${report.entities.length} entidades`);
+      logChange(`Análisis: ${parts.join(", ")}`);
     } catch (e) {
       reportError(e);
     } finally {
@@ -669,6 +691,7 @@
     enriching = true;
     try {
       characters = await api.enrichProject(selectedProjectId, null);
+      logChange(`Enriquecimiento: ${characters.length} descripciones generadas`);
     } catch (e) {
       reportError(e);
     } finally {
@@ -682,6 +705,15 @@
     } catch (e) {
       console.error(e);
     }
+  }
+
+  async function chat(message: string): Promise<string> {
+    return await api.chat(message, iaStatus?.settings.llm_model ?? null);
+  }
+
+  function logChange(summary: string) {
+    changeLog = [{ time: new Date().toLocaleTimeString(), summary }, ...changeLog];
+    if (changeLog.length > 200) changeLog = changeLog.slice(0, 200);
   }
 
   async function updateEmbeddings(enabled: boolean) {
@@ -778,6 +810,41 @@
     } finally {
       correcting = false;
     }
+  }
+
+  async function checkSpelling() {
+    if (!selectedSceneId) return;
+    spellBusy = true;
+    try {
+      spellReport = await api.spellCheck(sceneContent);
+      spellOpen = true;
+    } catch (e) {
+      reportError(e);
+    } finally {
+      spellBusy = false;
+    }
+  }
+
+  async function installSpell(code: string) {
+    spellBusy = true;
+    try {
+      await api.spellInstall(code);
+      spellReport = await api.spellCheck(sceneContent);
+    } catch (e) {
+      reportError(e);
+    } finally {
+      spellBusy = false;
+    }
+  }
+
+  function replaceWord(word: string, suggestion: string) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    sceneContent = sceneContent.replace(
+      new RegExp(`\\b${escaped}\\b`, "gi"),
+      suggestion,
+    );
+    editorRevision++;
+    scheduleSave();
   }
 
   // -------------------------------------------------------------------------
@@ -962,6 +1029,12 @@
             onclick={correctGrammar}
             disabled={correcting}
           >{correcting ? "Corrigiendo…" : "Corregir"}</button>
+          <button
+            class="btn"
+            title="Revisar ortografía (Hunspell, sin LLM)"
+            onclick={checkSpelling}
+            disabled={spellBusy}
+          >{spellBusy ? "Revisando…" : "Ortografía"}</button>
         {/if}
 
         <div class="dropdown">
@@ -983,9 +1056,16 @@
 
         <button
           class="btn btn-toggle"
+          class:active={worldOpen}
+          onclick={() => (worldOpen = !worldOpen)}
+          title="World Building: personajes, relaciones y mundo"
+        >Mundo</button>
+
+        <button
+          class="btn btn-toggle"
           class:active={optionsOpen}
           onclick={() => (optionsOpen = !optionsOpen)}
-          title="Panel de personajes, metadatos y versiones"
+          title="Asistente, metadatos y versiones"
         >Panel</button>
 
         {#if selectedSceneId}
@@ -1067,23 +1147,8 @@
             onsavechapter={saveChapterMeta}
             onsavescene={saveSceneMeta}
             onupdatelevels={updateProjectLevels}
-            {characters}
-            {relationships}
-            {entities}
-            {analyzing}
-            {enriching}
-            progress={analyzeProgress}
-            {iaStatus}
-            onanalyze={analyze}
-            onenrich={enrich}
-            ondeletecharacter={deleteCharacter}
-            ondeleteentity={deleteEntity}
-            onupdateembeddings={updateEmbeddings}
-            oninstallembeddings={installEmbeddings}
-            onupdatenerengine={updateNerEngine}
-            oninstallgliner={installGliner}
-            oninstallonnxruntime={installOnnxRuntime}
-            onupdatekeeploaded={updateKeepLoaded}
+            ollamaAvailable={ollamaAvailable}
+            onchat={chat}
             {snapshots}
             snapshotBusy={snapshotBusy}
             oncreatesnapshot={createSnapshot}
@@ -1103,6 +1168,40 @@
       {selectedSceneId}
       onselect={handleQuickSelect}
       onclose={() => (switcherOpen = false)}
+    />
+  {/if}
+
+  {#if worldOpen}
+    <WorldBuilding
+      {characters}
+      {relationships}
+      {entities}
+      {analyzing}
+      {enriching}
+      progress={analyzeProgress}
+      {iaStatus}
+      {changeLog}
+      onanalyze={analyze}
+      onenrich={enrich}
+      ondeletecharacter={deleteCharacter}
+      ondeleteentity={deleteEntity}
+      onupdateembeddings={updateEmbeddings}
+      oninstallembeddings={installEmbeddings}
+      onupdatenerengine={updateNerEngine}
+      oninstallgliner={installGliner}
+      oninstallonnxruntime={installOnnxRuntime}
+      onupdatekeeploaded={updateKeepLoaded}
+      onclose={() => (worldOpen = false)}
+    />
+  {/if}
+
+  {#if spellOpen}
+    <SpellPanel
+      report={spellReport}
+      installing={spellBusy}
+      oninstall={installSpell}
+      onreplace={replaceWord}
+      onclose={() => (spellOpen = false)}
     />
   {/if}
 </div>

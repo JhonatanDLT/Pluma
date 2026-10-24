@@ -22,13 +22,17 @@
 - **Reordenamiento** por arrastrar y soltar.
 - **Navegación**: conmutador rápido (`Ctrl/Cmd+K`) para saltar a cualquier capítulo/escena, y atajos de teclado entre capítulos y escenas.
 - **Progreso de escritura** por capítulo con **objetivo de palabras configurable** por proyecto.
-- **Interfaz reorganizada**: selección de proyecto como vista principal, paneles de capítulos/escenas colapsables y redimensionables, y panel de opciones por pestañas (Personajes / Metadatos / Versiones / Ajustes).
+- **Interfaz reorganizada**: selección de proyecto como vista principal, paneles de capítulos/escenas colapsables y redimensionables, y un **panel derecho ligero** con **asistente (minibot)**, metadatos, versiones y ajustes.
+- **World Building**: vista dedicada (botón «Mundo») con personajes (ficha técnica), relaciones, facciones, lugares y **registro de cambios** del análisis.
+- **Asistente local (minibot)**: conversa con el LLM (Ollama) desde el panel derecho.
 - **Niveles configurables**: renombra las etiquetas de la jerarquía (p. ej. «Volúmenes»/«Capítulos») y oculta automáticamente el segundo nivel cuando el manuscrito no usa subdivisión de escenas.
 - **Exportación**: Markdown, TXT, HTML, Word (`.docx`), PDF y EPUB.
 - **IA local modular (opt-in)**: personajes y relaciones por reglas (siempre), más **NER con GLiNER2** y **embeddings semánticos** opcionales, y **LLM (Ollama)** para enriquecer descripciones.
+- **Análisis mejorado**: deduplicación de personajes (títulos y apodos), tipado de relaciones por co-localización de oraciones, y un único motor NER a la vez (menos ruido y más rápido).
 - **Entidades** (lugares y facciones) detectadas con GLiNER2, con pestañas dedicadas.
 - **Hoja de personaje** (ficha detallada) al seleccionar un personaje.
-- **Corrector gramatical** de escenas con LLM local (Ollama).
+- **Corrector gramatical** de escenas con LLM local (Ollama, modelo ligero dedicado `qwen2.5:0.5b`).
+- **Ortografía multilingüe**: corrector Hunspell con detección automática de idioma (`whatlang`) y diccionarios descargables bajo demanda, sin LLM.
 - **Perfil de rendimiento**: opción de mantener los modelos cargados en memoria.
 - **TTS**: voz del sistema operativo.
 - **Versionado** (snapshots) con detección de cambios por huella SHA-256: guardar, restaurar y eliminar versiones del manuscrito.
@@ -40,7 +44,8 @@
 - **NER con GLiNER2** (`gliner2-rs`): modelo local multilingüe (~1 GB) para detectar personajes con mayor precisión.
 - **Embeddings semánticos** (`fastembed`): descarga ~120 MB la primera vez; mejora la resolución de alias.
 - **Runtime ONNX Runtime**: se descarga e instala automáticamente (con permiso) la primera vez que se activa un motor de IA local.
-- **Enriquecimiento con LLM (Ollama)**: genera descripciones de personaje y corrige gramática/ortografía con un LLM local.
+- **Enriquecimiento con LLM (Ollama)**: genera descripciones de personaje con un LLM local.
+- **Diccionarios de ortografía** (Hunspell): se descargan bajo demanda por idioma (pocos MB cada uno).
 - **OCR de imágenes y PDFs escaneados**: requiere Tesseract (+ Poppler para PDFs escaneados).
 
 ### 🔜 Pendiente (mejoras)
@@ -75,7 +80,8 @@ chronotriggerv0/
 │  ├─ 04-tts.md
 │  ├─ 05-modelo-de-datos.md
 │  ├─ 06-roadmap.md
-│  └─ 07-investigacion-ia.md
+│  ├─ 07-investigacion-ia.md
+│  └─ 08-plan-maestro.md
 ├─ src/                         # Frontend Svelte
 │  ├─ routes/
 │  │  ├─ +layout.svelte
@@ -161,6 +167,7 @@ cargo check     # Rust (desde src-tauri/)
 | [`docs/05-modelo-de-datos.md`](docs/05-modelo-de-datos.md) | Entidades, esquema SQL y relaciones |
 | [`docs/06-roadmap.md`](docs/06-roadmap.md) | Fases e hitos |
 | [`docs/07-investigacion-ia.md`](docs/07-investigacion-ia.md) | Investigación de modelos y algoritmos de IA local |
+| [`docs/08-plan-maestro.md`](docs/08-plan-maestro.md) | Visión de producto, principios y roadmap completo |
 
 ---
 

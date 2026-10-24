@@ -8,6 +8,10 @@ use crate::error::{AppError, Result};
 /// Modelo por defecto (ligero y con buena calidad en español).
 pub const DEFAULT_MODEL: &str = "qwen2.5:1.5b";
 
+/// Modelo por defecto para corrección gramatical. Es más ligero que el de chat:
+/// una tarea de corrección no necesita tanta capacidad generativa.
+pub const GRAMMAR_MODEL: &str = "qwen2.5:0.5b";
+
 /// Genera texto con Ollama ejecutando el modelo localmente.
 pub fn generate(model: &str, prompt: &str) -> Result<String> {
     let output = std::process::Command::new("ollama")
@@ -61,6 +65,18 @@ pub fn correct_grammar(model: &str, text: &str) -> Result<String> {
          literario. Conserva el estilo, el vocabulario y el significado originales; \
          no reescribas ni añadas contenido. Responde únicamente con el texto \
          corregido, sin comentarios ni comillas.\n\n{text}"
+    );
+    generate(model, &prompt)
+}
+
+/// Responde a una consulta del autor usando el LLM local como asistente de
+/// escritura. Devuelve únicamente la respuesta.
+pub fn chat(model: &str, message: &str) -> Result<String> {
+    let message = truncate(message, 8000);
+    let prompt = format!(
+        "Eres Pluma, un asistente de escritura literaria. Responde de forma clara, \
+         concisa y útil a la consulta del autor. Si trata sobre su novela, da \
+         sugerencias concretas y accionables.\n\nAutor: {message}\n\nAsistente:"
     );
     generate(model, &prompt)
 }

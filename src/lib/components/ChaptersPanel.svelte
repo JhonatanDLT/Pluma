@@ -7,6 +7,10 @@
     selectedChapterId,
     selectedSceneId,
     wordGoal,
+    mode = "tree",
+    level1Name = "Capítulos",
+    level2Name = "Escenas",
+    showScenes = true,
     onselectchapter,
     onselectscene,
     oncreatechapter,
@@ -21,6 +25,10 @@
     selectedChapterId: string | null;
     selectedSceneId: string | null;
     wordGoal: number;
+    mode?: "tree" | "flat";
+    level1Name?: string;
+    level2Name?: string;
+    showScenes?: boolean;
     onselectchapter: (id: string) => void;
     onselectscene: (id: string) => void;
     oncreatechapter: (title: string) => void;
@@ -79,13 +87,13 @@
 
   function selectChapter(id: string) {
     onselectchapter(id);
-    if (!isExpanded(id)) expandedIds = [...expandedIds, id];
+    if (mode === "tree" && !isExpanded(id)) expandedIds = [...expandedIds, id];
   }
 </script>
 
 <div class="chapters-panel">
   <div class="panel-head">
-    <span class="label">Capítulos</span>
+    <span class="label">{level1Name}</span>
     <div class="goal">
       {#if editingGoal}
         <input
@@ -104,7 +112,7 @@
       {/if}
     </div>
     <div class="head-actions">
-      <button class="btn-icon" title="Nuevo capítulo" onclick={() => (showInput = !showInput)}>＋</button>
+      <button class="btn-icon" title={`Crear ${level1Name}`} onclick={() => (showInput = !showInput)}>＋</button>
       <button class="btn-icon" title="Colapsar panel" onclick={ontoggle}>⟨</button>
     </div>
   </div>
@@ -114,7 +122,7 @@
       <input
         class="input"
         bind:value={chapterInput}
-        placeholder="Título del capítulo…"
+        placeholder="Título…"
         onkeydown={(e) => e.key === "Enter" && submit()}
       />
       <button class="btn btn-primary" onclick={submit}>Crear</button>
@@ -136,12 +144,14 @@
           class="chapter-row"
           class:selected={chapter.id === selectedChapterId}
         >
-          <button
-            class="chevron"
-            class:open={isExpanded(chapter.id)}
-            title={isExpanded(chapter.id) ? "Contraer" : "Expandir"}
-            onclick={() => toggleExpand(chapter.id)}
-          >▸</button>
+          {#if mode === "tree" && showScenes}
+            <button
+              class="chevron"
+              class:open={isExpanded(chapter.id)}
+              title={isExpanded(chapter.id) ? "Contraer" : "Expandir"}
+              onclick={() => toggleExpand(chapter.id)}
+            >▸</button>
+          {/if}
           <button class="item-main" onclick={() => selectChapter(chapter.id)}>
             <span class="item-top">
               <span class="item-title">{chapter.title}</span>
@@ -151,10 +161,10 @@
               <span class="item-progress-fill" style:width="{progress(chapter)}%"></span>
             </span>
           </button>
-          <button class="item-del" title="Eliminar capítulo" onclick={() => ondeletechapter(chapter.id)}>×</button>
+          <button class="item-del" title={`Eliminar ${level1Name}`} onclick={() => ondeletechapter(chapter.id)}>×</button>
         </div>
 
-        {#if isExpanded(chapter.id)}
+        {#if mode === "tree" && showScenes && isExpanded(chapter.id)}
           <ul class="scene-list">
             {#each scenesFor(chapter.id) as entry, si (entry.scene_id)}
               <li
@@ -175,7 +185,7 @@
                 </button>
               </li>
             {:else}
-              <li class="scene-empty">Sin escenas</li>
+              <li class="scene-empty">Sin {level2Name.toLowerCase()}</li>
             {/each}
           </ul>
         {/if}

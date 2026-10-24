@@ -4,6 +4,9 @@ export interface Project {
   author: string | null;
   description: string | null;
   word_goal: number;
+  cover_path: string | null;
+  level1_name: string;
+  level2_name: string;
   created_at: string;
   updated_at: string;
 }

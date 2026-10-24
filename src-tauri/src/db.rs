@@ -13,6 +13,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0004_entities.sql"),
     include_str!("../migrations/0005_snapshots.sql"),
     include_str!("../migrations/0006_word_goal.sql"),
+    include_str!("../migrations/0007_cover.sql"),
+    include_str!("../migrations/0008_level_names.sql"),
 ];
 
 /// Conexión a SQLite compartida entre comandos.

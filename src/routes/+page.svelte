@@ -9,6 +9,7 @@
   import QuickSwitcher from "$lib/components/QuickSwitcher.svelte";
   import * as api from "$lib/api";
   import { open, save } from "@tauri-apps/plugin-dialog";
+  import { listen } from "@tauri-apps/api/event";
   import type {
     Chapter,
     Character,
@@ -44,6 +45,7 @@
   let errorMsg = $state<string | null>(null);
   let importing = $state(false);
   let analyzing = $state(false);
+  let analyzeProgress = $state<{ done: number; total: number; phase: string } | null>(null);
   let enriching = $state(false);
   let correcting = $state(false);
   let editorRevision = $state(0);
@@ -96,6 +98,22 @@
   );
   const wordCount = $derived(countWords(sceneContent));
 
+  // El segundo nivel (escenas) solo se considera "en uso" cuando al menos un
+  // capítulo tiene más de una escena. Así, novelas de un único nivel (p. ej.
+  // volúmenes/capítulos sin subdivisión) no muestran una jerarquía vacía.
+  const projectUsesScenes = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const entry of navigation) {
+      if (entry.scene_id !== null) {
+        counts.set(entry.chapter_id, (counts.get(entry.chapter_id) ?? 0) + 1);
+      }
+    }
+    for (const n of counts.values()) {
+      if (n > 1) return true;
+    }
+    return false;
+  });
+
   const exportFormats = [
     { format: "md", label: "Markdown", ext: "md" },
     { format: "txt", label: "Texto plano", ext: "txt" },
@@ -108,6 +126,15 @@
   onMount(async () => {
     await loadProjects();
     await loadIaStatus();
+  });
+
+  onMount(() => {
+    const unlisten = listen("analyze-progress", (e) => {
+      analyzeProgress = e.payload as { done: number; total: number; phase: string };
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   });
 
   onMount(() => {
@@ -196,6 +223,12 @@
     sceneTitle = null;
     currentScene = null;
     scenes = await api.listScenes(id);
+    // Abre la primera escena automáticamente: en proyectos de un solo nivel esto
+    // elimina el flujo «clic capítulo → clic escena», y en multi-escena ofrece un
+    // punto de partida consistente con el conmutador rápido.
+    if (scenes.length > 0) {
+      await selectScene(scenes[0].id);
+    }
   }
 
   async function selectScene(id: string) {
@@ -214,9 +247,6 @@
 
   async function goToChapter(id: string) {
     await selectChapter(id);
-    if (scenes.length > 0) {
-      await selectScene(scenes[0].id);
-    }
   }
 
   async function goToSceneInChapter(chapterId: string, sceneId: string) {
@@ -316,9 +346,14 @@
   // Creación y borrado
   // -------------------------------------------------------------------------
 
-  async function createProject(title: string) {
+  async function createProject(
+    title: string,
+    goal: number | null,
+    description: string | null,
+    coverPath: string | null,
+  ) {
     try {
-      const project = await api.createProject(title);
+      const project = await api.createProject(title, goal, description, coverPath);
       projects = await api.listProjects();
       await selectProject(project.id);
     } catch (e) {
@@ -452,23 +487,15 @@
     }
   }
 
-  async function importProject() {
+  async function importProject(
+    path: string,
+    goal: number | null,
+    description: string | null,
+    coverPath: string | null,
+  ) {
     try {
-      const selected = await open({
-        multiple: false,
-        directory: false,
-        title: "Importar proyecto (PDF, EPUB, DOCX, TXT…)",
-        filters: [
-          {
-            name: "Documentos",
-            extensions: ["pdf", "epub", "docx", "md", "markdown", "txt"],
-          },
-        ],
-      });
-      if (typeof selected !== "string") return;
-
       importing = true;
-      const project = await api.importFileAsProject(selected);
+      const project = await api.importFileAsProject(path, goal, description, coverPath);
       projects = await api.listProjects();
       await selectProject(project.id);
     } catch (e) {
@@ -562,6 +589,16 @@
     }
   }
 
+  async function updateProjectLevels(level1Name: string, level2Name: string) {
+    if (!selectedProjectId) return;
+    try {
+      const updated = await api.updateProjectLevels(selectedProjectId, level1Name, level2Name);
+      projects = projects.map((p) => (p.id === updated.id ? updated : p));
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Exportación
   // -------------------------------------------------------------------------
@@ -590,8 +627,9 @@
   async function analyze() {
     if (!selectedProjectId) return;
     analyzing = true;
+    analyzeProgress = { done: 0, total: 0, phase: "escenas" };
     try {
-      const report = await api.analyzeProject(selectedProjectId);
+      const report = await api.analyzeProject(selectedProjectId, selectedChapterId);
       characters = report.characters;
       relationships = report.relationships;
       entities = report.entities;
@@ -599,6 +637,7 @@
       reportError(e);
     } finally {
       analyzing = false;
+      analyzeProgress = null;
     }
   }
 
@@ -859,6 +898,10 @@
             {selectedChapterId}
             {selectedSceneId}
             wordGoal={selectedProject?.word_goal ?? 3000}
+            mode={viewMode === "tree" ? "tree" : "flat"}
+            level1Name={selectedProject?.level1_name ?? "Capítulos"}
+            level2Name={selectedProject?.level2_name ?? "Escenas"}
+            showScenes={projectUsesScenes}
             onselectchapter={selectChapter}
             onselectscene={selectScene}
             oncreatechapter={createChapter}
@@ -871,7 +914,7 @@
         </aside>
         <button class="divider" type="button" aria-label="Ajustar ancho" onmousedown={() => beginDrag("chapters")}></button>
       {:else}
-        <button class="collapsed-tab" onclick={() => (chaptersCollapsed = false)}>Capítulos</button>
+        <button class="collapsed-tab" onclick={() => (chaptersCollapsed = false)}>{selectedProject?.level1_name ?? "Capítulos"}</button>
       {/if}
 
       {#if viewMode === "split"}
@@ -880,6 +923,7 @@
             <ScenesPanel
               {scenes}
               {selectedSceneId}
+              level2Name={selectedProject?.level2_name ?? "Escenas"}
               onselectscene={selectScene}
               oncreatescene={createScene}
               ondeletescene={deleteScene}
@@ -889,7 +933,7 @@
           </aside>
           <button class="divider" type="button" aria-label="Ajustar ancho" onmousedown={() => beginDrag("scenes")}></button>
         {:else}
-          <button class="collapsed-tab" onclick={() => (scenesCollapsed = false)}>Escenas</button>
+          <button class="collapsed-tab" onclick={() => (scenesCollapsed = false)}>{selectedProject?.level2_name ?? "Escenas"}</button>
         {/if}
       {/if}
 
@@ -997,11 +1041,17 @@
       {:else}
         <div class="empty">
           <div class="empty-mark">✒</div>
-          <h2>Comienza tu historia</h2>
-          <p>
-            Crea un <strong>proyecto</strong>, añade un <strong>capítulo</strong> y
-            luego una <strong>escena</strong> para empezar a escribir.
-          </p>
+          {#if selectedChapterId}
+            <h2>Sin escenas todavía</h2>
+            <p>Este capítulo no tiene contenido. Crea su primera escena para empezar a escribir.</p>
+            <button class="btn btn-primary" onclick={() => createScene(null)}>＋ Nueva escena</button>
+          {:else}
+            <h2>Comienza tu historia</h2>
+            <p>
+              Crea un <strong>proyecto</strong>, añade un <strong>capítulo</strong> y
+              luego una <strong>escena</strong> para empezar a escribir.
+            </p>
+          {/if}
         </div>
       {/if}
     </div>
@@ -1013,13 +1063,16 @@
           <OptionsPanel
             chapter={selectedChapter}
             scene={currentScene}
+            project={selectedProject}
             onsavechapter={saveChapterMeta}
             onsavescene={saveSceneMeta}
+            onupdatelevels={updateProjectLevels}
             {characters}
             {relationships}
             {entities}
             {analyzing}
             {enriching}
+            progress={analyzeProgress}
             {iaStatus}
             onanalyze={analyze}
             onenrich={enrich}

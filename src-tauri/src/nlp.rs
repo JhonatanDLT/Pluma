@@ -47,57 +47,68 @@ pub struct AnalysisResult {
     pub entities: Vec<DetectedEntity>,
 }
 
-/// Analiza un conjunto de textos (escenas) usando únicamente reglas locales.
-/// Es el camino por defecto: no requiere descargar ningún modelo.
-pub fn analyze<E: Embedder + ?Sized>(texts: &[String], embedder: Option<&mut E>) -> AnalysisResult {
-    let mut mentions: Vec<(usize, String)> = Vec::new();
-    for (scene_idx, text) in texts.iter().enumerate() {
-        for name in extract_candidates(text) {
-            mentions.push((scene_idx, name));
-        }
-    }
-    let (characters, relationships) = build_report(texts, &mentions, embedder);
-    AnalysisResult {
-        characters,
-        relationships,
-        entities: Vec::new(),
-    }
+/// Menciones recolectadas por tipo de entidad.
+#[derive(Debug, Default, Clone)]
+pub struct Mentions {
+    pub person: Vec<(usize, String)>,
+    pub location: Vec<(usize, String)>,
+    pub faction: Vec<(usize, String)>,
 }
 
-/// Analiza combinando un motor NER externo (por ejemplo GLiNER2) con las reglas
-/// locales: los candidatos de ambos orígenes se fusionan antes de agrupar alias.
-/// Si el motor falla, se continúa silenciosamente con las reglas.
-pub fn analyze_with_ner<E: Embedder + ?Sized, N: NerEngine + ?Sized>(
+/// Analiza un conjunto de textos (escenas) usando únicamente reglas locales.
+/// Es el camino por defecto: no requiere descargar ningún modelo.
+/// (Se usa principalmente en tests; el comando usa la variante por chunks.)
+#[allow(dead_code)]
+pub fn analyze<E: Embedder + ?Sized>(texts: &[String], embedder: Option<&mut E>) -> AnalysisResult {
+    let mentions = collect_mentions(texts, None, &mut |_, _| {});
+    analyze_mentions(texts, &mentions, embedder)
+}
+
+/// Recolecta menciones escena por escena (NER + reglas), informando del progreso
+/// `(escenas_procesadas, total)` tras cada escena. Permite procesar por chunks sin
+/// bloquear y mostrando avance.
+pub fn collect_mentions(
     texts: &[String],
-    ner: &mut N,
-    embedder: Option<&mut E>,
-) -> AnalysisResult {
-    let mut person_mentions: Vec<(usize, String)> = Vec::new();
-    let mut location_mentions: Vec<(usize, String)> = Vec::new();
-    let mut faction_mentions: Vec<(usize, String)> = Vec::new();
+    mut ner: Option<&mut dyn NerEngine>,
+    on_scene: &mut dyn FnMut(usize, usize),
+) -> Mentions {
+    let mut mentions = Mentions::default();
+    let total = texts.len();
 
     for (scene_idx, text) in texts.iter().enumerate() {
-        if let Ok(mentions) = ner.extract(text) {
-            for mention in mentions {
-                let bucket = match mention.label.as_str() {
-                    "person" => &mut person_mentions,
-                    "location" => &mut location_mentions,
-                    "organization" => &mut faction_mentions,
-                    _ => continue,
-                };
-                bucket.push((scene_idx, mention.text));
+        if let Some(ner) = ner.as_deref_mut() {
+            if let Ok(found) = ner.extract(text) {
+                for mention in found {
+                    match mention.label.as_str() {
+                        "person" => mentions.person.push((scene_idx, mention.text)),
+                        "location" => mentions.location.push((scene_idx, mention.text)),
+                        "organization" => mentions.faction.push((scene_idx, mention.text)),
+                        _ => {}
+                    }
+                }
             }
         }
         for name in extract_candidates(text) {
-            person_mentions.push((scene_idx, name));
+            mentions.person.push((scene_idx, name));
         }
+        on_scene(scene_idx + 1, total);
     }
 
-    let (characters, relationships) = build_report(texts, &person_mentions, embedder);
+    mentions
+}
+
+/// Construye el informe (personajes, relaciones y entidades) a partir de las
+/// menciones ya recolectadas.
+pub fn analyze_mentions<E: Embedder + ?Sized>(
+    texts: &[String],
+    mentions: &Mentions,
+    embedder: Option<&mut E>,
+) -> AnalysisResult {
+    let (characters, relationships) = build_report(texts, &mentions.person, embedder);
 
     let mut entities = Vec::new();
-    entities.extend(build_entities(texts, &location_mentions, "location"));
-    entities.extend(build_entities(texts, &faction_mentions, "faction"));
+    entities.extend(build_entities(texts, &mentions.location, "location"));
+    entities.extend(build_entities(texts, &mentions.faction, "faction"));
 
     AnalysisResult {
         characters,

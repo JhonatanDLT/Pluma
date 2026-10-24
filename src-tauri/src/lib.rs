@@ -50,6 +50,7 @@ pub fn run() {
             commands::rename_project,
             commands::delete_project,
             commands::update_project_goal,
+            commands::update_project_levels,
             commands::list_chapters,
             commands::create_chapter,
             commands::rename_chapter,

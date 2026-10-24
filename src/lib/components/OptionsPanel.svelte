@@ -7,6 +7,7 @@
     Character,
     Entity,
     IaStatus,
+    Project,
     Relationship,
     Scene,
     SnapshotMeta,
@@ -15,13 +16,16 @@
   let {
     chapter,
     scene,
+    project,
     onsavechapter,
     onsavescene,
+    onupdatelevels,
     characters,
     relationships,
     entities,
     analyzing,
     enriching,
+    progress,
     iaStatus,
     onanalyze,
     onenrich,
@@ -42,6 +46,7 @@
   }: {
     chapter: Chapter | null;
     scene: Scene | null;
+    project: Project | null;
     onsavechapter: (status: string, summary: string | null) => void;
     onsavescene: (meta: {
       status: string;
@@ -50,11 +55,13 @@
       timeLabel: string | null;
       summary: string | null;
     }) => void;
+    onupdatelevels: (level1Name: string, level2Name: string) => void;
     characters: Character[];
     relationships: Relationship[];
     entities: Entity[];
     analyzing: boolean;
     enriching: boolean;
+    progress: { done: number; total: number; phase: string } | null;
     iaStatus: IaStatus | null;
     onanalyze: () => void;
     onenrich: () => void;
@@ -74,8 +81,25 @@
     onloadsnapshots: () => void;
   } = $props();
 
-  type Tab = "chars" | "meta" | "versions";
+  type Tab = "chars" | "meta" | "versions" | "settings";
   let tab = $state<Tab>("chars");
+
+  let level1Name = $state("");
+  let level2Name = $state("");
+
+  $effect(() => {
+    if (project) {
+      level1Name = project.level1_name;
+      level2Name = project.level2_name;
+    }
+  });
+
+  function saveLevels() {
+    const l1 = level1Name.trim();
+    const l2 = level2Name.trim();
+    if (!l1 || !l2) return;
+    onupdatelevels(l1, l2);
+  }
 
   $effect(() => {
     if (tab === "versions") onloadsnapshots();
@@ -87,6 +111,7 @@
     <button class="tab" class:active={tab === "chars"} onclick={() => (tab = "chars")}>Personajes</button>
     <button class="tab" class:active={tab === "meta"} onclick={() => (tab = "meta")}>Metadatos</button>
     <button class="tab" class:active={tab === "versions"} onclick={() => (tab = "versions")}>Versiones</button>
+    <button class="tab" class:active={tab === "settings"} onclick={() => (tab = "settings")}>Ajustes</button>
   </div>
 
   <div class="tab-body">
@@ -97,6 +122,7 @@
         {entities}
         {analyzing}
         {enriching}
+        {progress}
         {iaStatus}
         onanalyze={onanalyze}
         onenrich={onenrich}
@@ -116,7 +142,7 @@
         onsavechapter={onsavechapter}
         onsavescene={onsavescene}
       />
-    {:else}
+    {:else if tab === "versions"}
       <VersionsPanel
         {snapshots}
         busy={snapshotBusy}
@@ -124,6 +150,27 @@
         onrestore={onrestoresnapshot}
         ondelete={ondeletesnapshot}
       />
+    {:else}
+      <div class="settings-panel">
+        <h4>Niveles</h4>
+        <p class="hint">
+          Renombra las etiquetas de la jerarquía de tu manuscrito. Por ejemplo,
+          «Volúmenes» y «Capítulos», o «Partes» y «Escenas».
+        </p>
+        <label class="field">
+          <span>Primer nivel</span>
+          <input class="input" bind:value={level1Name} placeholder="Capítulos" />
+        </label>
+        <label class="field">
+          <span>Segundo nivel</span>
+          <input class="input" bind:value={level2Name} placeholder="Escenas" />
+        </label>
+        <button
+          class="btn btn-primary"
+          onclick={saveLevels}
+          disabled={!level1Name.trim() || !level2Name.trim()}
+        >Guardar niveles</button>
+      </div>
     {/if}
   </div>
 </div>
@@ -164,5 +211,46 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+  }
+
+  .settings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .settings-panel h4 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+  }
+
+  .hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .input {
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
   }
 </style>

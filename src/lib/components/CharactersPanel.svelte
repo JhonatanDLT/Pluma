@@ -7,6 +7,7 @@
     entities,
     analyzing,
     enriching,
+    progress,
     iaStatus,
     onanalyze,
     onenrich,
@@ -24,6 +25,7 @@
     entities: Entity[];
     analyzing: boolean;
     enriching: boolean;
+    progress: { done: number; total: number; phase: string } | null;
     iaStatus: IaStatus | null;
     onanalyze: () => void;
     onenrich: () => void;
@@ -36,6 +38,12 @@
     oninstallonnxruntime: () => void;
     onupdatekeeploaded: (enabled: boolean) => void;
   } = $props();
+
+  const progressPct = $derived(
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.done / progress.total) * 100))
+      : 0,
+  );
 
   type Tab = "characters" | "locations" | "factions";
   let tab = $state<Tab>("characters");
@@ -79,6 +87,17 @@
       </button>
     </div>
   </div>
+
+  {#if analyzing}
+    <div class="progress-wrap">
+      <div class="progress-bar">
+        <div class="progress-fill" style:width="{progressPct}%"></div>
+      </div>
+      <span class="progress-label">
+        {progress ? (progress.phase === "informe" ? "Generando informe…" : `Escenas ${progress.done}/${progress.total}`) : "Analizando…"}
+      </span>
+    </div>
+  {/if}
 
   {#if iaStatus}
     <div class="ia-settings">
@@ -310,6 +329,34 @@
     gap: 8px;
     padding: 4px 16px 10px;
     border-bottom: 1px solid var(--border);
+  }
+
+  .progress-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .progress-bar {
+    height: 6px;
+    background: var(--bg-hover);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.2s;
+  }
+
+  .progress-label {
+    font-size: 11px;
+    color: var(--text-muted);
   }
 
   .toggle {

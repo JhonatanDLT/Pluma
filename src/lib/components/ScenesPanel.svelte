@@ -4,6 +4,7 @@
   let {
     scenes,
     selectedSceneId,
+    level2Name = "Escenas",
     onselectscene,
     oncreatescene,
     ondeletescene,
@@ -12,6 +13,7 @@
   }: {
     scenes: SceneMeta[];
     selectedSceneId: string | null;
+    level2Name?: string;
     onselectscene: (id: string) => void;
     oncreatescene: (title: string | null) => void;
     ondeletescene: (id: string) => void;
@@ -33,9 +35,9 @@
 
 <div class="scenes-panel">
   <div class="panel-head">
-    <span class="label">Escenas</span>
+    <span class="label">{level2Name}</span>
     <div class="head-actions">
-      <button class="btn-icon" title="Nueva escena" onclick={() => (showInput = !showInput)}>＋</button>
+      <button class="btn-icon" title={`Crear ${level2Name}`} onclick={() => (showInput = !showInput)}>＋</button>
       <button class="btn-icon" title="Colapsar panel" onclick={ontoggle}>⟨</button>
     </div>
   </div>
@@ -45,7 +47,7 @@
       <input
         class="input"
         bind:value={sceneInput}
-        placeholder="Título de la escena…"
+        placeholder="Título…"
         onkeydown={(e) => e.key === "Enter" && submit()}
       />
       <button class="btn btn-primary" onclick={submit}>Crear</button>
@@ -67,7 +69,7 @@
         <button class="item-main" onclick={() => onselectscene(scene.id)}>
           <span class="item-title">{scene.title ?? `Escena ${i + 1}`}</span>
         </button>
-        <button class="item-del" title="Eliminar escena" onclick={() => ondeletescene(scene.id)}>×</button>
+        <button class="item-del" title={`Eliminar ${level2Name}`} onclick={() => ondeletescene(scene.id)}>×</button>
       </li>
     {/each}
   </ul>

@@ -22,7 +22,8 @@
 - **Reordenamiento** por arrastrar y soltar.
 - **Navegación**: conmutador rápido (`Ctrl/Cmd+K`) para saltar a cualquier capítulo/escena, y atajos de teclado entre capítulos y escenas.
 - **Progreso de escritura** por capítulo con **objetivo de palabras configurable** por proyecto.
-- **Interfaz reorganizada**: selección de proyecto como vista principal, paneles de capítulos/escenas colapsables y redimensionables, y panel de opciones por pestañas (Personajes / Metadatos / Versiones).
+- **Interfaz reorganizada**: selección de proyecto como vista principal, paneles de capítulos/escenas colapsables y redimensionables, y panel de opciones por pestañas (Personajes / Metadatos / Versiones / Ajustes).
+- **Niveles configurables**: renombra las etiquetas de la jerarquía (p. ej. «Volúmenes»/«Capítulos») y oculta automáticamente el segundo nivel cuando el manuscrito no usa subdivisión de escenas.
 - **Exportación**: Markdown, TXT, HTML, Word (`.docx`), PDF y EPUB.
 - **IA local modular (opt-in)**: personajes y relaciones por reglas (siempre), más **NER con GLiNER2** y **embeddings semánticos** opcionales, y **LLM (Ollama)** para enriquecer descripciones.
 - **Entidades** (lugares y facciones) detectadas con GLiNER2, con pestañas dedicadas.
@@ -45,8 +46,7 @@
 ### 🔜 Pendiente (mejoras)
 
 - TTS neuronal (Piper) — ver `docs/04`.
-- Exportar EPUB.
-- Pulido: atajos de teclado, modo foco, split-view, edición de fichas de personaje.
+- Pulido: atajos de teclado, modo foco, edición de fichas de personaje.
 
 ---
 
@@ -167,7 +167,6 @@ cargo check     # Rust (desde src-tauri/)
 ## Siguientes pasos
 
 1. **TTS neuronal** — Piper (ver [`docs/04-tts.md`](docs/04-tts.md)).
-2. **Exportar EPUB** — ampliar `export.rs`.
-3. **Pulido** — atajos de teclado, modo foco, split-view, edición de fichas de personaje.
+2. **Pulido** — atajos de teclado, modo foco, edición de fichas de personaje.
 
 Ver [`docs/06-roadmap.md`](docs/06-roadmap.md) para el detalle completo.

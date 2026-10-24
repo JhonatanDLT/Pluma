@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::MutexGuard;
 
 use rusqlite::Connection;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::db::Db;
 use crate::error::{AppError, Result};
@@ -58,9 +58,17 @@ pub fn list_projects(db: State<'_, Db>) -> Result<Vec<Project>> {
 }
 
 #[tauri::command]
-pub fn create_project(db: State<'_, Db>, title: String) -> Result<Project> {
+pub fn create_project(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    title: String,
+    goal: Option<i64>,
+    description: Option<String>,
+    cover_path: Option<String>,
+) -> Result<Project> {
+    let cover = persist_cover(&app, cover_path.as_deref())?;
     let conn = lock(&db)?;
-    repo::create_project(&conn, &title)
+    repo::create_project(&conn, &title, goal.unwrap_or(3000), description, cover)
 }
 
 #[tauri::command]
@@ -79,6 +87,17 @@ pub fn delete_project(db: State<'_, Db>, id: String) -> Result<()> {
 pub fn update_project_goal(db: State<'_, Db>, id: String, goal: i64) -> Result<Project> {
     let conn = lock(&db)?;
     repo::update_project_goal(&conn, &id, goal)
+}
+
+#[tauri::command]
+pub fn update_project_levels(
+    db: State<'_, Db>,
+    id: String,
+    level1_name: String,
+    level2_name: String,
+) -> Result<Project> {
+    let conn = lock(&db)?;
+    repo::update_project_levels(&conn, &id, &level1_name, &level2_name)
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +197,14 @@ pub fn import_file(db: State<'_, Db>, project_id: String, path: String) -> Resul
 /// Crea un proyecto nuevo a partir de un archivo (PDF, EPUB, DOCX, TXT, …),
 /// usando el nombre del archivo como título del proyecto.
 #[tauri::command]
-pub fn import_file_as_project(db: State<'_, Db>, path: String) -> Result<Project> {
+pub fn import_file_as_project(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    path: String,
+    goal: Option<i64>,
+    description: Option<String>,
+    cover_path: Option<String>,
+) -> Result<Project> {
     let path = std::path::Path::new(&path);
     let title = path
         .file_stem()
@@ -186,11 +212,12 @@ pub fn import_file_as_project(db: State<'_, Db>, path: String) -> Result<Project
         .filter(|s| !s.is_empty())
         .unwrap_or("Documento importado");
 
+    let cover = persist_cover(&app, cover_path.as_deref())?;
     let markdown = extract::extract_markdown(path)?;
     let manuscript = parser::parse(&markdown);
 
     let mut guard = lock(&db)?;
-    let project = repo::create_project(&guard, title)?;
+    let project = repo::create_project(&guard, title, goal.unwrap_or(3000), description, cover)?;
     repo::import_manuscript(&mut *guard, &project.id, &manuscript)?;
     Ok(project)
 }
@@ -316,26 +343,62 @@ pub fn delete_entity(db: State<'_, Db>, id: String) -> Result<()> {
     repo::delete_entity(&conn, &id)
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct AnalyzeProgress {
+    pub done: usize,
+    pub total: usize,
+    pub phase: String,
+}
+
+fn emit_progress(app: &tauri::AppHandle, done: usize, total: usize, phase: &str) {
+    let _ = app.emit(
+        "analyze-progress",
+        AnalyzeProgress {
+            done,
+            total,
+            phase: phase.to_string(),
+        },
+    );
+}
+
+/// Analiza un capítulo (o el proyecto completo si `chapter_id` es `None`).
+///
+/// Es **asíncrono** para no bloquear la interfaz, y emite eventos de progreso
+/// `analyze-progress` mientras procesa escena por escena.
 #[tauri::command]
-pub fn analyze_project(
+pub async fn analyze_project(
     app: tauri::AppHandle,
     db: State<'_, Db>,
     project_id: String,
+    chapter_id: Option<String>,
 ) -> Result<AnalysisReport> {
     let settings = crate::settings::load(&settings_path(&app)?);
     let data_dir = data_dir(&app)?;
 
+    // Alcance: solo el capítulo indicado, o el proyecto completo.
     let texts: Vec<String> = {
         let guard = lock(&db)?;
-        let content = repo::get_project_content(&guard, &project_id)?;
-        content
-            .iter()
-            .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
-            .collect()
+        if let Some(chapter_id) = &chapter_id {
+            let chapter = repo::get_chapter(&guard, chapter_id)?
+                .ok_or_else(|| AppError::NotFound(format!("capítulo {chapter_id}")))?;
+            if !matches!(chapter.status.as_str(), "revised" | "final") {
+                return Err(AppError::Validation(
+                    "marca el capítulo como 'Revisado' o 'Final' antes de analizarlo".into(),
+                ));
+            }
+            repo::list_scenes_full(&guard, chapter_id)?
+                .iter()
+                .map(|s| s.content_markdown.clone())
+                .collect()
+        } else {
+            repo::get_project_content(&guard, &project_id)?
+                .iter()
+                .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
+                .collect()
+        }
     };
 
-    // Atajo de rendimiento: si el manuscrito no cambió desde el último análisis,
-    // devuelve los resultados guardados sin volver a ejecutar NER/embeddings.
+    // Atajo de rendimiento: si nada cambió y ya hay resultados, devolverlos.
     let fingerprint = hash_texts(&texts);
     {
         let guard = lock(&db)?;
@@ -343,6 +406,7 @@ pub fn analyze_project(
             == Some(fingerprint.as_str())
             && !repo::list_characters(&guard, &project_id)?.is_empty()
         {
+            emit_progress(&app, 1, 1, "completado");
             return Ok(AnalysisReport {
                 characters: repo::list_characters(&guard, &project_id)?,
                 relationships: repo::list_relationships(&guard, &project_id)?,
@@ -355,6 +419,8 @@ pub fn analyze_project(
     // disponible; en caso contrario se usan exclusivamente las reglas locales.
     let onnxrt_ready = crate::runtime::is_available(&data_dir);
     let cache = app.state::<crate::engines::ModelCache>();
+
+    emit_progress(&app, 0, texts.len(), "escenas");
 
     let result = {
         let mut embedder_guard = lock_model(&cache.embedder)?;
@@ -370,19 +436,20 @@ pub fn analyze_project(
             None
         };
 
-        let ner = if onnxrt_ready {
-            if ner_guard.is_none() || !settings.keep_loaded {
-                *ner_guard = crate::engines::create_ner(&settings, &gliner_cache_dir(&app)?);
-            }
-            ner_guard.as_mut()
-        } else {
-            None
-        };
-
-        match ner {
-            Some(ner) => nlp::analyze_with_ner(&texts, ner, embedder),
-            None => nlp::analyze(&texts, embedder),
+        if onnxrt_ready && (ner_guard.is_none() || !settings.keep_loaded) {
+            *ner_guard = crate::engines::create_ner(&settings, &gliner_cache_dir(&app)?);
         }
+        let ner_dyn: Option<&mut dyn crate::engines::NerEngine> = ner_guard
+            .as_mut()
+            .map(|n| n as &mut dyn crate::engines::NerEngine);
+
+        // Recolecta menciones escena por escena, informando del progreso.
+        let mentions = nlp::collect_mentions(&texts, ner_dyn, &mut |done, total| {
+            emit_progress(&app, done, total, "escenas");
+        });
+
+        emit_progress(&app, texts.len(), texts.len(), "informe");
+        nlp::analyze_mentions(&texts, &mentions, embedder)
     };
 
     // En el perfil de mínimo consumo, libera los modelos tras cada análisis.
@@ -446,6 +513,8 @@ pub fn analyze_project(
     repo::replace_relationships(&mut *guard, &project_id, &relationships)?;
     repo::replace_entities(&mut *guard, &project_id, &entities)?;
     repo::set_project_fingerprint(&guard, &project_id, Some(&fingerprint))?;
+
+    emit_progress(&app, 1, 1, "completado");
 
     Ok(AnalysisReport {
         characters,
@@ -526,6 +595,28 @@ fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
     app.path()
         .app_data_dir()
         .map_err(|e| AppError::Internal(format!("no se pudo resolver el directorio de datos: {e}")))
+}
+
+/// Copia la portada elegida por el usuario al directorio de datos de la app,
+/// para que persista y pueda usarse al exportar. Devuelve la ruta persistida
+/// (o `None` si no se proporcionó portada).
+fn persist_cover(app: &tauri::AppHandle, source: Option<&str>) -> Result<Option<String>> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let source = std::path::Path::new(source);
+    if !source.is_file() {
+        return Ok(None);
+    }
+
+    let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let dir = data_dir(app)?.join("covers");
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+
+    std::fs::copy(source, &dest)
+        .map_err(|e| AppError::Internal(format!("no se pudo copiar la portada: {e}")))?;
+    Ok(Some(dest.to_string_lossy().into_owned()))
 }
 
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf> {

@@ -16,14 +16,23 @@ import type {
 
 // Proyectos
 export const listProjects = () => invoke<Project[]>("list_projects");
-export const createProject = (title: string) =>
-  invoke<Project>("create_project", { title });
+export const createProject = (
+  title: string,
+  goal: number | null,
+  description: string | null,
+  coverPath: string | null,
+) => invoke<Project>("create_project", { title, goal, description, coverPath });
 export const renameProject = (id: string, title: string) =>
   invoke<Project>("rename_project", { id, title });
 export const deleteProject = (id: string) =>
   invoke<void>("delete_project", { id });
 export const updateProjectGoal = (id: string, goal: number) =>
   invoke<Project>("update_project_goal", { id, goal });
+export const updateProjectLevels = (
+  id: string,
+  level1Name: string,
+  level2Name: string,
+) => invoke<Project>("update_project_levels", { id, level1Name, level2Name });
 
 // Capítulos
 export const listChapters = (projectId: string) =>
@@ -52,8 +61,12 @@ export const importMarkdown = (projectId: string, markdown: string) =>
   invoke<Chapter[]>("import_markdown", { projectId, markdown });
 export const importFile = (projectId: string, path: string) =>
   invoke<Chapter[]>("import_file", { projectId, path });
-export const importFileAsProject = (path: string) =>
-  invoke<Project>("import_file_as_project", { path });
+export const importFileAsProject = (
+  path: string,
+  goal: number | null,
+  description: string | null,
+  coverPath: string | null,
+) => invoke<Project>("import_file_as_project", { path, goal, description, coverPath });
 
 // Metadatos
 export const updateChapterMeta = (
@@ -110,8 +123,8 @@ export const deleteCharacter = (id: string) =>
   invoke<void>("delete_character", { id });
 export const deleteEntity = (id: string) =>
   invoke<void>("delete_entity", { id });
-export const analyzeProject = (projectId: string) =>
-  invoke<AnalysisReport>("analyze_project", { projectId });
+export const analyzeProject = (projectId: string, chapterId: string | null) =>
+  invoke<AnalysisReport>("analyze_project", { projectId, chapterId });
 export const enrichProject = (projectId: string, model: string | null) =>
   invoke<Character[]>("enrich_project", { projectId, model });
 export const correctText = (text: string, model: string | null) =>

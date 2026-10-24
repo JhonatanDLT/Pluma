@@ -15,6 +15,9 @@ pub struct Project {
     pub author: Option<String>,
     pub description: Option<String>,
     pub word_goal: i64,
+    pub cover_path: Option<String>,
+    pub level1_name: String,
+    pub level2_name: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -28,6 +31,9 @@ impl Project {
             author: None,
             description: None,
             word_goal: 3000,
+            cover_path: None,
+            level1_name: "Capítulos".to_string(),
+            level2_name: "Escenas".to_string(),
             created_at: ts.clone(),
             updated_at: ts,
         }

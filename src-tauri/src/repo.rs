@@ -12,24 +12,42 @@ use crate::parser::ParsedManuscript;
 // Proyectos
 // ---------------------------------------------------------------------------
 
-pub fn create_project(conn: &Connection, title: &str) -> Result<Project> {
+pub fn create_project(
+    conn: &Connection,
+    title: &str,
+    goal: i64,
+    description: Option<String>,
+    cover_path: Option<String>,
+) -> Result<Project> {
     let title = title.trim();
     if title.is_empty() {
         return Err(AppError::Validation(
             "el título no puede estar vacío".into(),
         ));
     }
+    if goal <= 0 {
+        return Err(AppError::Validation(
+            "el objetivo debe ser mayor que cero".into(),
+        ));
+    }
 
-    let project = Project::new(title);
+    let mut project = Project::new(title);
+    project.word_goal = goal;
+    project.description = description;
+    project.cover_path = cover_path;
+
     conn.execute(
-        "INSERT INTO project (id, title, author, description, word_goal, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        "INSERT INTO project (id, title, author, description, word_goal, cover_path, level1_name, level2_name, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
         params![
             project.id,
             project.title,
             project.author,
             project.description,
             project.word_goal,
+            project.cover_path,
+            project.level1_name,
+            project.level2_name,
             project.created_at
         ],
     )?;
@@ -38,7 +56,7 @@ pub fn create_project(conn: &Connection, title: &str) -> Result<Project> {
 
 pub fn list_projects(conn: &Connection) -> Result<Vec<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, author, description, word_goal, created_at, updated_at
+        "SELECT id, title, author, description, word_goal, cover_path, level1_name, level2_name, created_at, updated_at
          FROM project ORDER BY updated_at DESC",
     )?;
     let projects = stmt
@@ -49,7 +67,7 @@ pub fn list_projects(conn: &Connection) -> Result<Vec<Project>> {
 
 pub fn get_project(conn: &Connection, id: &str) -> Result<Option<Project>> {
     conn.query_row(
-        "SELECT id, title, author, description, word_goal, created_at, updated_at
+        "SELECT id, title, author, description, word_goal, cover_path, level1_name, level2_name, created_at, updated_at
          FROM project WHERE id = ?1",
         params![id],
         project_from_row,
@@ -95,6 +113,38 @@ pub fn update_project_goal(conn: &Connection, id: &str, goal: i64) -> Result<Pro
     let affected = conn.execute(
         "UPDATE project SET word_goal = ?1, updated_at = ?2 WHERE id = ?3",
         params![goal, updated_at, id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("proyecto {id}")));
+    }
+    get_project(conn, id)?.ok_or_else(|| AppError::NotFound(format!("proyecto {id}")))
+}
+
+/// Renombra las etiquetas de los dos niveles de la jerarquía (p. ej.
+/// "Capítulos"/"Escenas" o "Volúmenes"/"Capítulos"). Ambos deben ser no vacíos.
+pub fn update_project_levels(
+    conn: &Connection,
+    id: &str,
+    level1_name: &str,
+    level2_name: &str,
+) -> Result<Project> {
+    let level1_name = level1_name.trim();
+    let level2_name = level2_name.trim();
+    if level1_name.is_empty() {
+        return Err(AppError::Validation(
+            "el nombre del primer nivel no puede estar vacío".into(),
+        ));
+    }
+    if level2_name.is_empty() {
+        return Err(AppError::Validation(
+            "el nombre del segundo nivel no puede estar vacío".into(),
+        ));
+    }
+
+    let updated_at = Utc::now().to_rfc3339();
+    let affected = conn.execute(
+        "UPDATE project SET level1_name = ?1, level2_name = ?2, updated_at = ?3 WHERE id = ?4",
+        params![level1_name, level2_name, updated_at, id],
     )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("proyecto {id}")));
@@ -158,7 +208,7 @@ pub fn rename_chapter(conn: &Connection, id: &str, title: &str) -> Result<Chapte
     if affected == 0 {
         return Err(AppError::NotFound(format!("capítulo {id}")));
     }
-    chapter_by_id(conn, id)?.ok_or_else(|| AppError::NotFound(format!("capítulo {id}")))
+    get_chapter(conn, id)?.ok_or_else(|| AppError::NotFound(format!("capítulo {id}")))
 }
 
 pub fn delete_chapter(conn: &Connection, id: &str) -> Result<()> {
@@ -169,7 +219,7 @@ pub fn delete_chapter(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
-fn chapter_by_id(conn: &Connection, id: &str) -> Result<Option<Chapter>> {
+pub fn get_chapter(conn: &Connection, id: &str) -> Result<Option<Chapter>> {
     conn.query_row(
         "SELECT id, project_id, position, title, status, summary, word_count
          FROM chapter WHERE id = ?1",
@@ -343,7 +393,7 @@ pub fn update_chapter_meta(
     if affected == 0 {
         return Err(AppError::NotFound(format!("capítulo {id}")));
     }
-    chapter_by_id(conn, id)?.ok_or_else(|| AppError::NotFound(format!("capítulo {id}")))
+    get_chapter(conn, id)?.ok_or_else(|| AppError::NotFound(format!("capítulo {id}")))
 }
 
 pub fn update_scene_meta(
@@ -895,8 +945,11 @@ fn project_from_row(row: &Row<'_>) -> rusqlite::Result<Project> {
         author: row.get(2)?,
         description: row.get(3)?,
         word_goal: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        cover_path: row.get(5)?,
+        level1_name: row.get(6)?,
+        level2_name: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -1028,6 +1081,22 @@ mod tests {
         .unwrap();
 
         (project, chapter, scene)
+    }
+
+    #[test]
+    fn update_project_levels_renames_levels() {
+        let conn = crate::db::test_connection();
+        let project = create_project(&conn, "Novela", 5000, None, None).unwrap();
+        assert_eq!(project.level1_name, "Capítulos");
+        assert_eq!(project.level2_name, "Escenas");
+
+        let updated = update_project_levels(&conn, &project.id, "Volúmenes", "Capítulos").unwrap();
+        assert_eq!(updated.level1_name, "Volúmenes");
+        assert_eq!(updated.level2_name, "Capítulos");
+
+        // Nombres vacíos o solo espacios → error de validación.
+        assert!(update_project_levels(&conn, &project.id, "", "Escenas").is_err());
+        assert!(update_project_levels(&conn, &project.id, "Partes", "   ").is_err());
     }
 
     #[test]

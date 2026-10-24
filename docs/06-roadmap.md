@@ -90,10 +90,14 @@ se genera una ficha con relaciones sugeridas. ✅
 - [x] **Rendimiento**: análisis incremental y importación con sentencias preparadas.
 - [x] **Navegación**: conmutador rápido (`Ctrl/Cmd+K`) y atajos entre capítulos/escenas.
 - [x] **Vista de árbol** (índice multinivel) además de la vista separada; paneles persistidos entre sesiones.
-- [x] **Progreso de escritura** por capítulo (objetivo de palabras) y búsqueda de proyectos.
+- [x] **Progreso de escritura** por capítulo (objetivo de palabras configurable) y búsqueda de proyectos.
+- [x] **Análisis en segundo plano** (asíncrono) con barra de progreso, acotado al capítulo en curso y solo para capítulos 'Revisado'/'Final'.
+- [x] **Configuración de proyecto** (nombre, objetivo, resumen, portada) al crear/importar.
+- [x] **Niveles configurables**: etiquetas renombrables de la jerarquía (p. ej. «Volúmenes»/«Capítulos») y ocultación automática del segundo nivel cuando no hay subdivisión de escenas.
 - [ ] TTS neuronal local (Piper) y voces por personaje.
 - [ ] Test de ida y vuelta EPUB (exportar → importar y verificar capítulos).
 - [ ] Ampliar el clasificador de estructura: encabezados centrados y numeración `1.` / `1)`.
+- [ ] **Portada en la exportación** (PDF y EPUB): usar `project.cover_path` como portada.
 
 **Criterio de salida**: con Ollama activo, generar una ficha enriquecida desde un
 fragmento; sin Ollama, la app sigue funcionando con la Capa 1.

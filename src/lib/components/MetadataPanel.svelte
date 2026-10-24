@@ -19,89 +19,141 @@
     }) => void;
   } = $props();
 
-  let status = $state("draft");
-  let summary = $state("");
+  let chapterStatus = $state("draft");
+  let chapterSummary = $state("");
+
+  let sceneStatus = $state("draft");
   let pov = $state("");
   let location = $state("");
   let timeLabel = $state("");
-
-  const isScene = $derived(scene !== null);
+  let sceneSummary = $state("");
 
   $effect(() => {
+    if (chapter) {
+      chapterStatus = chapter.status;
+      chapterSummary = chapter.summary ?? "";
+    }
     if (scene) {
-      status = scene.status;
-      summary = scene.summary ?? "";
+      sceneStatus = scene.status;
+      sceneSummary = scene.summary ?? "";
       pov = scene.pov ?? "";
       location = scene.location ?? "";
       timeLabel = scene.time_label ?? "";
-    } else if (chapter) {
-      status = chapter.status;
-      summary = chapter.summary ?? "";
-      pov = "";
-      location = "";
-      timeLabel = "";
     }
   });
 
-  function save() {
+  function saveChapter() {
+    if (chapter) onsavechapter(chapterStatus, chapterSummary.trim() || null);
+  }
+
+  function saveScene() {
     if (scene) {
       onsavescene({
-        status,
+        status: sceneStatus,
         pov: pov.trim() || null,
         location: location.trim() || null,
         timeLabel: timeLabel.trim() || null,
-        summary: summary.trim() || null,
+        summary: sceneSummary.trim() || null,
       });
-    } else if (chapter) {
-      onsavechapter(status, summary.trim() || null);
     }
   }
 </script>
 
 {#if chapter || scene}
   <div class="meta-panel">
-    <div class="meta-field">
-      <label for="meta-status">Estado</label>
-      <select id="meta-status" class="input" bind:value={status}>
-        <option value="draft">Borrador</option>
-        <option value="revised">Revisado</option>
-        <option value="final">Final</option>
-      </select>
-    </div>
-
-    {#if isScene}
-      <div class="meta-field">
-        <label for="meta-pov">Punto de vista</label>
-        <input id="meta-pov" class="input" bind:value={pov} placeholder="Ana / Tercera persona…" />
-      </div>
-      <div class="meta-field">
-        <label for="meta-loc">Lugar</label>
-        <input id="meta-loc" class="input" bind:value={location} placeholder="Madrid, 1936…" />
-      </div>
-      <div class="meta-field">
-        <label for="meta-time">Tiempo</label>
-        <input id="meta-time" class="input" bind:value={timeLabel} placeholder="Noche / Al amanecer…" />
-      </div>
+    {#if chapter}
+      <section class="meta-section">
+        <h4>Capítulo</h4>
+        <div class="meta-row">
+          <div class="meta-field">
+            <label for="chapter-status">Estado</label>
+            <select id="chapter-status" class="input" bind:value={chapterStatus}>
+              <option value="draft">Borrador</option>
+              <option value="revised">Revisado</option>
+              <option value="final">Final</option>
+            </select>
+          </div>
+          <div class="meta-field grow">
+            <label for="chapter-summary">Resumen</label>
+            <textarea id="chapter-summary" class="input" bind:value={chapterSummary} rows="2" placeholder="De qué trata este capítulo…"></textarea>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick={saveChapter}>Guardar capítulo</button>
+      </section>
     {/if}
 
-    <div class="meta-field grow">
-      <label for="meta-summary">Resumen</label>
-      <textarea id="meta-summary" class="input" bind:value={summary} rows="2" placeholder="De qué trata…"></textarea>
-    </div>
-
-    <button class="btn btn-primary" onclick={save}>Guardar</button>
+    {#if scene}
+      <section class="meta-section">
+        <h4>Escena</h4>
+        <div class="meta-row">
+          <div class="meta-field">
+            <label for="scene-status">Estado</label>
+            <select id="scene-status" class="input" bind:value={sceneStatus}>
+              <option value="draft">Borrador</option>
+              <option value="revised">Revisado</option>
+              <option value="final">Final</option>
+            </select>
+          </div>
+          <div class="meta-field">
+            <label for="scene-pov">Punto de vista</label>
+            <input id="scene-pov" class="input" bind:value={pov} placeholder="Ana / Tercera persona…" />
+          </div>
+          <div class="meta-field">
+            <label for="scene-loc">Lugar</label>
+            <input id="scene-loc" class="input" bind:value={location} placeholder="Madrid, 1936…" />
+          </div>
+          <div class="meta-field">
+            <label for="scene-time">Tiempo</label>
+            <input id="scene-time" class="input" bind:value={timeLabel} placeholder="Noche / Al amanecer…" />
+          </div>
+        </div>
+        <div class="meta-field grow">
+          <label for="scene-summary">Resumen</label>
+          <textarea id="scene-summary" class="input" bind:value={sceneSummary} rows="2" placeholder="De qué trata esta escena…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick={saveScene}>Guardar escena</button>
+      </section>
+    {/if}
   </div>
 {/if}
 
 <style>
   .meta-panel {
     display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 12px;
-    padding: 12px 20px;
+    flex-direction: column;
+    gap: 16px;
+    padding: 14px 20px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-elevated);
+    overflow-y: auto;
+  }
+
+  .meta-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 14px;
+    border-bottom: 1px dashed var(--border);
+  }
+
+  .meta-section:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .meta-section h4 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+  }
+
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
   }
 
   .meta-field {

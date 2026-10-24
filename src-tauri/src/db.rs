@@ -6,7 +6,11 @@ use rusqlite::Connection;
 use crate::error::{AppError, Result};
 
 /// Migraciones de esquema, aplicadas de forma versionada mediante `PRAGMA user_version`.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_metadata.sql"),
+    include_str!("../migrations/0003_characters.sql"),
+];
 
 /// Conexión a SQLite compartida entre comandos.
 ///

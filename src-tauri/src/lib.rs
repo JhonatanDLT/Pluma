@@ -1,8 +1,16 @@
 mod commands;
 mod db;
+mod engines;
 mod error;
+mod export;
+mod extract;
+mod llm;
 mod models;
+mod nlp;
+mod parser;
 mod repo;
+mod settings;
+mod tts;
 
 use std::path::PathBuf;
 
@@ -24,6 +32,7 @@ fn resolve_db_path(app: &tauri::AppHandle) -> Result<PathBuf> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let path = resolve_db_path(app.handle())?;
             app.manage(db::Db::open(&path)?);
@@ -43,6 +52,23 @@ pub fn run() {
             commands::get_scene,
             commands::save_scene,
             commands::delete_scene,
+            commands::import_markdown,
+            commands::import_file,
+            commands::update_chapter_meta,
+            commands::update_scene_meta,
+            commands::move_chapter,
+            commands::move_scene,
+            commands::export_project,
+            commands::list_characters,
+            commands::list_relationships,
+            commands::delete_character,
+            commands::analyze_project,
+            commands::enrich_project,
+            commands::ia_status,
+            commands::ia_set_settings,
+            commands::ia_install,
+            commands::tts_speak,
+            commands::tts_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error al ejecutar la aplicación Tauri");

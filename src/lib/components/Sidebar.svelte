@@ -17,6 +17,8 @@
     ondeleteproject,
     ondeletechapter,
     ondeletescene,
+    onmovechapter,
+    onmovescene,
   }: {
     projects: Project[];
     chapters: Chapter[];
@@ -33,6 +35,8 @@
     ondeleteproject: (id: string) => void;
     ondeletechapter: (id: string) => void;
     ondeletescene: (id: string) => void;
+    onmovechapter: (id: string, index: number) => void;
+    onmovescene: (id: string, index: number) => void;
   } = $props();
 
   let projectInput = $state("");
@@ -41,6 +45,7 @@
   let showProjectInput = $state(false);
   let showChapterInput = $state(false);
   let showSceneInput = $state(false);
+  let dragId = $state<string | null>(null);
 
   function submitProject() {
     const title = projectInput.trim();
@@ -134,8 +139,17 @@
       {/if}
 
       <ul class="list">
-        {#each chapters as chapter (chapter.id)}
-          <li class:selected={chapter.id === selectedChapterId}>
+        {#each chapters as chapter, i (chapter.id)}
+          <li
+            class:selected={chapter.id === selectedChapterId}
+            draggable="true"
+            ondragstart={() => (dragId = chapter.id)}
+            ondragover={(e) => e.preventDefault()}
+            ondrop={(e) => {
+              e.preventDefault();
+              if (dragId) onmovechapter(dragId, i);
+            }}
+          >
             <button class="item-main" onclick={() => onselectchapter(chapter.id)}>
               <span class="item-title">{chapter.title}</span>
               <span class="item-count">{chapter.word_count.toLocaleString()}</span>
@@ -176,7 +190,16 @@
 
       <ul class="list">
         {#each scenes as scene, i (scene.id)}
-          <li class:selected={scene.id === selectedSceneId}>
+          <li
+            class:selected={scene.id === selectedSceneId}
+            draggable="true"
+            ondragstart={() => (dragId = scene.id)}
+            ondragover={(e) => e.preventDefault()}
+            ondrop={(e) => {
+              e.preventDefault();
+              if (dragId) onmovescene(dragId, i);
+            }}
+          >
             <button class="item-main" onclick={() => onselectscene(scene.id)}>
               <span class="item-title">{scene.title ?? `Escena ${i + 1}`}</span>
             </button>

@@ -33,9 +33,56 @@ export interface Scene {
   title: string | null;
   content_markdown: string;
   summary: string | null;
+  status: string;
+  pov: string | null;
+  location: string | null;
+  time_label: string | null;
   word_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface Character {
+  id: string;
+  project_id: string;
+  name: string;
+  aliases: string[];
+  role: string | null;
+  description: string | null;
+  biography: string | null;
+  traits: string[];
+  goals: string[];
+  arc: string | null;
+  color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Relationship {
+  id: string;
+  project_id: string;
+  character_a_id: string;
+  character_b_id: string;
+  kind: string | null;
+  intensity: number;
+  description: string | null;
+}
+
+export interface AnalysisReport {
+  characters: Character[];
+  relationships: Relationship[];
+}
+
+export interface IaSettings {
+  ner_engine: string;
+  embeddings: boolean;
+  llm_model: string | null;
+}
+
+export interface IaStatus {
+  settings: IaSettings;
+  embeddings_cached: boolean;
+  ollama_available: boolean;
 }
 
 export type EditorMode = "wysiwyg" | "source";

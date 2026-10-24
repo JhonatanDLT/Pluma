@@ -6,6 +6,19 @@ con el método **MoSCoW**: `M` (must), `S` (should), `C` (could), `W` (won't now
 
 ---
 
+## Estado de implementación (resumen)
+
+- ✅ **Editor + persistencia** (FR-01..04, FR-40): editor WYSIWYG/Markdown, SQLite, autoguardado, proyectos.
+- ✅ **Estructura narrativa** (FR-10..14): parser de capítulos/escenas/beats, reordenamiento drag&drop, metadatos.
+- ✅ **Personajes y relaciones** (FR-20..25): detección por reglas, alias (con embeddings opt-in), tipos de relación, descripciones + enriquecimiento con LLM local (Ollama).
+- ✅ **Exportación** (FR-41..43, FR-46): Markdown, TXT, HTML, Word (`.docx`) y PDF.
+- ✅ **TTS** (FR-30, FR-31): voz del sistema, reproducir/detener.
+- ✅ **Importación** (FR-44): `.md`, `.txt`, `.pdf` (texto) y `.docx`.
+- ⚠️ **OCR** (opcional): requiere Tesseract (+ Poppler para PDFs escaneados).
+- 🔜 **Pendiente**: NER con GLiNER (aplazado por conflicto de `ort`), TTS neuronal (FR-33).
+
+---
+
 ## 1. Visión
 
 Una aplicación de escritorio **offline-first** para escribir novelas y textos literarios.

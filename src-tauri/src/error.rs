@@ -9,6 +9,9 @@ pub enum AppError {
     #[error("error de base de datos: {0}")]
     Database(#[from] rusqlite::Error),
 
+    #[error("error de E/S: {0}")]
+    Io(#[from] std::io::Error),
+
     #[error("no encontrado: {0}")]
     NotFound(String),
 

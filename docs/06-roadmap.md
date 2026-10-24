@@ -19,62 +19,67 @@ añadir IA profunda o TTS neuronal.
 
 ---
 
-## Fase 1 — Estructura narrativa
+## Fase 1 — Estructura narrativa ✅ (implementada)
 
 **Objetivo**: el manuscrito se organiza solo.
 
-- [ ] Parser Markdown → árbol de capítulos/escenas/beats (`parser/`).
-- [ ] Importar un manuscrito `.md` completo.
-- [ ] Reordenamiento por arrastrar y soltar.
-- [ ] Metadatos por escena (estado, resumen, POV).
+- [x] Parser Markdown → árbol de capítulos/escenas/beats (`parser/`) + tests unitarios.
+- [x] Importar un manuscrito (`.md` / `.txt`) completo (selector de archivo nativo).
+- [x] Importar `.pdf` con capa de texto.
+- [x] Reordenamiento por arrastrar y soltar.
+- [x] Metadatos por escena (estado, resumen, POV, lugar, tiempo).
+- [x] OCR de imágenes y PDFs escaneados (opcional: requiere Tesseract + Poppler).
 
-**Criterio de salida**: pegar un Markdown con encabezados y ver el árbol generado.
+**Criterio de salida**: pegar un Markdown con encabezados y ver el árbol generado. ✅
 
 ---
 
-## Fase 2 — Personajes y relaciones
+## Fase 2 — Personajes y relaciones ✅ (Capa 1 + Capa 2 básica)
 
 **Objetivo**: detección asistida por IA local.
 
-- [ ] Migración `0002` (personajes, relaciones, menciones).
-- [ ] NER por reglas + atribución de diálogo (Capa 1).
-- [ ] Embeddings (`fastembed-rs`) para resolución de alias.
-- [ ] Fichas de personaje editables.
-- [ ] Co-ocurrencia → relaciones sugeridas + grafo visual.
+- [x] Migraciones `0002`/`0003` (metadatos + personajes/relaciones).
+- [x] NER por reglas + atribución de diálogo (Capa 1).
+- [x] Resolución de alias por similitud de cadenas (`strsim`).
+- [x] Fichas de personaje (rol + descripción + eliminación).
+- [x] Co-ocurrencia → relaciones con tipo (familia/romance/rivalidad/amistad).
+- [x] Enriquecimiento de descripciones con LLM local (Ollama, opcional).
+
+**Pendiente (Capa 2 avanzada)**: embeddings (`fastembed-rs`) y NER (GLiNER) — ver `docs/07`.
 
 **Criterio de salida**: en un texto de prueba, se detectan los personajes principales y
-se genera una ficha con relaciones sugeridas (editables).
+se genera una ficha con relaciones sugeridas. ✅
 
 ---
 
-## Fase 3 — Exportación
+## Fase 3 — Exportación ✅ (implementada)
 
 **Objetivo**: compatibilidad con Word/Notion/Obsidian.
 
-- [ ] Exportar Markdown y TXT.
-- [ ] Exportar Word (`.docx`) y HTML.
-- [ ] Exportar PDF.
-- [ ] Importar Markdown/TXT/DOCX.
+- [x] Exportar Markdown y TXT.
+- [x] Exportar Word (`.docx`) y HTML.
+- [x] Exportar PDF.
+- [x] Importar DOCX.
 
-**Criterio de salida**: exportar un capítulo a `.docx` y abrirlo en Word sin perder
-negritas, encabezados ni listas.
-
----
-
-## Fase 4 — TTS básico
-
-- [ ] TTS con voz del sistema (macOS/Windows/Linux).
-- [ ] Controles reproducir/pausar/detener, velocidad y voz.
-- [ ] Resaltado por oración.
-
-**Criterio de salida**: escuchar un capítulo con la voz del sistema.
+**Criterio de salida**: exportar un capítulo a `.docx` y abrirlo en Word. ✅
 
 ---
 
-## Fase 5 — IA profunda (futuro)
+## Fase 4 — TTS básico ✅ (implementado)
 
-- [ ] NER con `ort` (modelo cuantizado) para mayor precisión.
-- [ ] Integración **Ollama** (opcional) para fichas y relaciones enriquecidas.
+- [x] TTS con voz del sistema (macOS/Windows/Linux).
+- [x] Controles reproducir/detener.
+- [ ] Selección de voz/velocidad y resaltado por oración (pendiente).
+
+**Criterio de salida**: escuchar un capítulo con la voz del sistema. ✅
+
+---
+
+## Fase 5 — IA profunda (en curso)
+
+- [x] Integración **Ollama** (opcional) para enriquecer descripciones de personaje.
+- [x] Embeddings (`fastembed`) para resolución de alias semántica (opt-in).
+- [ ] NER con GLiNER — aplazado por conflicto de versiones de `ort` (ver `docs/07`).
 - [ ] Exportar EPUB.
 - [ ] TTS neuronal local (Piper) y voces por personaje.
 

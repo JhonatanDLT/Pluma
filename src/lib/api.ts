@@ -1,5 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Chapter, Project, Scene, SceneMeta } from "./types";
+import type {
+  AnalysisReport,
+  Chapter,
+  Character,
+  IaSettings,
+  IaStatus,
+  Project,
+  Relationship,
+  Scene,
+  SceneMeta,
+} from "./types";
 
 // Proyectos
 export const listProjects = () => invoke<Project[]>("list_projects");
@@ -29,3 +39,76 @@ export const getScene = (id: string) => invoke<Scene>("get_scene", { id });
 export const saveScene = (id: string, content: string) =>
   invoke<Scene>("save_scene", { id, content });
 export const deleteScene = (id: string) => invoke<void>("delete_scene", { id });
+
+// Importación de manuscritos
+export const importMarkdown = (projectId: string, markdown: string) =>
+  invoke<Chapter[]>("import_markdown", { projectId, markdown });
+export const importFile = (projectId: string, path: string) =>
+  invoke<Chapter[]>("import_file", { projectId, path });
+
+// Metadatos
+export const updateChapterMeta = (
+  id: string,
+  status: string,
+  summary: string | null,
+) => invoke<Chapter>("update_chapter_meta", { id, status, summary });
+
+export const updateSceneMeta = (
+  id: string,
+  status: string,
+  pov: string | null,
+  location: string | null,
+  timeLabel: string | null,
+  summary: string | null,
+) =>
+  invoke<Scene>("update_scene_meta", {
+    id,
+    status,
+    pov,
+    location,
+    timeLabel,
+    summary,
+  });
+
+// Reordenamiento
+export const moveChapter = (
+  projectId: string,
+  id: string,
+  newPosition: number,
+) => invoke<Chapter[]>("move_chapter", { projectId, id, newPosition });
+
+export const moveScene = (
+  chapterId: string,
+  id: string,
+  newPosition: number,
+) => invoke<SceneMeta[]>("move_scene", { chapterId, id, newPosition });
+
+// Exportación
+export const exportProject = (
+  projectId: string,
+  format: string,
+  path: string,
+) => invoke<void>("export_project", { projectId, format, path });
+
+// Personajes y relaciones (IA)
+export const listCharacters = (projectId: string) =>
+  invoke<Character[]>("list_characters", { projectId });
+export const listRelationships = (projectId: string) =>
+  invoke<Relationship[]>("list_relationships", { projectId });
+export const deleteCharacter = (id: string) =>
+  invoke<void>("delete_character", { id });
+export const analyzeProject = (projectId: string) =>
+  invoke<AnalysisReport>("analyze_project", { projectId });
+export const enrichProject = (projectId: string, model: string | null) =>
+  invoke<Character[]>("enrich_project", { projectId, model });
+
+// Configuración de IA (opt-in)
+export const iaStatus = () => invoke<IaStatus>("ia_status");
+export const iaSetSettings = (settings: IaSettings) =>
+  invoke<IaSettings>("ia_set_settings", { settings });
+export const iaInstall = (engine: string) => invoke<void>("ia_install", { engine });
+
+// Texto a voz
+export const ttsSpeak = (text: string, voice: string | null, rate: number) =>
+  invoke<void>("tts_speak", { text, voice, rate });
+export const ttsStop = () => invoke<void>("tts_stop");

@@ -77,6 +77,10 @@ pub struct Scene {
     pub title: Option<String>,
     pub content_markdown: String,
     pub summary: Option<String>,
+    pub status: String,
+    pub pov: Option<String>,
+    pub location: Option<String>,
+    pub time_label: Option<String>,
     pub word_count: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -92,9 +96,71 @@ impl Scene {
             title,
             content_markdown: String::new(),
             summary: None,
+            status: "draft".into(),
+            pov: None,
+            location: None,
+            time_label: None,
             word_count: 0,
             created_at: ts.clone(),
             updated_at: ts,
         }
     }
+}
+
+/// Personaje de un proyecto, generado/detectado por el análisis de IA.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Character {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub aliases: Vec<String>,
+    pub role: Option<String>,
+    pub description: Option<String>,
+    pub biography: Option<String>,
+    pub traits: Vec<String>,
+    pub goals: Vec<String>,
+    pub arc: Option<String>,
+    pub color: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl Character {
+    pub fn new(project_id: impl Into<String>, name: impl Into<String>) -> Self {
+        let ts = now();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: project_id.into(),
+            name: name.into(),
+            aliases: Vec::new(),
+            role: None,
+            description: None,
+            biography: None,
+            traits: Vec::new(),
+            goals: Vec::new(),
+            arc: None,
+            color: None,
+            created_at: ts.clone(),
+            updated_at: ts,
+        }
+    }
+}
+
+/// Relación entre dos personajes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Relationship {
+    pub id: String,
+    pub project_id: String,
+    pub character_a_id: String,
+    pub character_b_id: String,
+    pub kind: Option<String>,
+    pub intensity: f64,
+    pub description: Option<String>,
+}
+
+/// Resultado del análisis narrativo (personajes y relaciones).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisReport {
+    pub characters: Vec<Character>,
+    pub relationships: Vec<Relationship>,
 }

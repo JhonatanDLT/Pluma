@@ -3,6 +3,7 @@ export interface Project {
   title: string;
   author: string | null;
   description: string | null;
+  word_goal: number;
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +73,21 @@ export interface AnalysisReport {
   characters: Character[];
   relationships: Relationship[];
   entities: Entity[];
+}
+
+export interface SnapshotMeta {
+  id: string;
+  project_id: string;
+  message: string | null;
+  scene_count: number;
+  created_at: string;
+}
+
+export interface NavEntry {
+  chapter_id: string;
+  chapter_title: string;
+  scene_id: string | null;
+  scene_title: string | null;
 }
 
 export interface Entity {

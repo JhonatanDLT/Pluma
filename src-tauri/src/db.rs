@@ -11,6 +11,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_metadata.sql"),
     include_str!("../migrations/0003_characters.sql"),
     include_str!("../migrations/0004_entities.sql"),
+    include_str!("../migrations/0005_snapshots.sql"),
+    include_str!("../migrations/0006_word_goal.sql"),
 ];
 
 /// Conexión a SQLite compartida entre comandos.
@@ -58,4 +60,12 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn test_connection() -> Connection {
+    let mut conn = Connection::open_in_memory().expect("base de datos en memoria");
+    conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk");
+    migrate(&mut conn).expect("migraciones");
+    conn
 }

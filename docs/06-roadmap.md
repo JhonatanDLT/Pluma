@@ -86,6 +86,11 @@ se genera una ficha con relaciones sugeridas. ✅
 - [x] **Corrector gramatical** con LLM local (Ollama).
 - [x] **Perfil de rendimiento**: mantener modelos en memoria (opt-in, `keep_loaded`).
 - [x] **Exportar/importar EPUB** y **inferencia de estructura** para texto plano.
+- [x] **Versionado (snapshots)** con detección de cambios por huella SHA-256.
+- [x] **Rendimiento**: análisis incremental y importación con sentencias preparadas.
+- [x] **Navegación**: conmutador rápido (`Ctrl/Cmd+K`) y atajos entre capítulos/escenas.
+- [x] **Vista de árbol** (índice multinivel) además de la vista separada; paneles persistidos entre sesiones.
+- [x] **Progreso de escritura** por capítulo (objetivo de palabras) y búsqueda de proyectos.
 - [ ] TTS neuronal local (Piper) y voces por personaje.
 - [ ] Test de ida y vuelta EPUB (exportar → importar y verificar capítulos).
 - [ ] Ampliar el clasificador de estructura: encabezados centrados y numeración `1.` / `1)`.

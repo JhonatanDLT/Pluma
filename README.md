@@ -17,9 +17,12 @@
 - **Persistencia** SQLite: proyectos → capítulos → escenas, con migraciones versionadas.
 - **Autoguardado** con debounce e indicador de estado.
 - **Parser de estructura**: capítulos (`#`), escenas (`##`) y beats (`###`).
-- **Importación**: `.md`, `.txt`, `.pdf` (con capa de texto), `.docx` y `.epub`, con **inferencia de estructura** para texto plano sin encabezados.
+- **Importación**: `.md`, `.txt`, `.pdf` (con capa de texto), `.docx` y `.epub`, con **inferencia de estructura** para texto plano. Desde la vista de proyectos puedes **crear un proyecto completo** a partir de un archivo (el nombre del archivo será el título).
 - **Metadatos**: estado, resumen, POV, lugar y tiempo por capítulo/escena.
 - **Reordenamiento** por arrastrar y soltar.
+- **Navegación**: conmutador rápido (`Ctrl/Cmd+K`) para saltar a cualquier capítulo/escena, y atajos de teclado entre capítulos y escenas.
+- **Progreso de escritura** por capítulo con **objetivo de palabras configurable** por proyecto.
+- **Interfaz reorganizada**: selección de proyecto como vista principal, paneles de capítulos/escenas colapsables y redimensionables, y panel de opciones por pestañas (Personajes / Metadatos / Versiones).
 - **Exportación**: Markdown, TXT, HTML, Word (`.docx`), PDF y EPUB.
 - **IA local modular (opt-in)**: personajes y relaciones por reglas (siempre), más **NER con GLiNER2** y **embeddings semánticos** opcionales, y **LLM (Ollama)** para enriquecer descripciones.
 - **Entidades** (lugares y facciones) detectadas con GLiNER2, con pestañas dedicadas.
@@ -27,6 +30,8 @@
 - **Corrector gramatical** de escenas con LLM local (Ollama).
 - **Perfil de rendimiento**: opción de mantener los modelos cargados en memoria.
 - **TTS**: voz del sistema operativo.
+- **Versionado** (snapshots) con detección de cambios por huella SHA-256: guardar, restaurar y eliminar versiones del manuscrito.
+- **Rendimiento**: análisis incremental (no reanaliza si el texto no cambió) e importación con sentencias preparadas.
 - **Estilo** minimalista y elegante (paleta cálida, tipografía serif, modo oscuro).
 
 ### ⚠️ Opcional (opt-in, descarga bajo demanda)

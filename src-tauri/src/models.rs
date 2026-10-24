@@ -14,6 +14,7 @@ pub struct Project {
     pub title: String,
     pub author: Option<String>,
     pub description: Option<String>,
+    pub word_goal: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -26,6 +27,7 @@ impl Project {
             title: title.into(),
             author: None,
             description: None,
+            word_goal: 3000,
             created_at: ts.clone(),
             updated_at: ts,
         }
@@ -196,4 +198,25 @@ pub struct AnalysisReport {
     pub characters: Vec<Character>,
     pub relationships: Vec<Relationship>,
     pub entities: Vec<Entity>,
+}
+
+/// Metadatos de una versión (snapshot) del proyecto.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotMeta {
+    pub id: String,
+    pub project_id: String,
+    pub message: Option<String>,
+    pub scene_count: i64,
+    pub created_at: String,
+}
+
+/// Entrada plana del índice de navegación (capítulo o escena), para el
+/// conmutador rápido y la navegación por teclado.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NavEntry {
+    pub chapter_id: String,
+    pub chapter_title: String,
+    /// `None` cuando la entrada representa un capítulo sin escena asociada.
+    pub scene_id: Option<String>,
+    pub scene_title: Option<String>,
 }

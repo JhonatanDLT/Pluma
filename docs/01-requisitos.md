@@ -14,6 +14,8 @@ con el método **MoSCoW**: `M` (must), `S` (should), `C` (could), `W` (won't now
 - ✅ **Entidades** (lugares/facciones) detectadas con GLiNER2 y hoja de personaje.
 - ✅ **Corrector gramatical** (FR nuevo) con LLM local (Ollama).
 - ✅ **Perfil de rendimiento**: mantener modelos en memoria (opt-in).
+- ✅ **Versionado** (FR-06): snapshots con detección de cambios por huella SHA-256.
+- ✅ **Rendimiento**: análisis incremental (no reanaliza si el texto no cambió).
 - ✅ **Exportación** (FR-41..43, FR-46): Markdown, TXT, HTML, Word (`.docx`) y PDF.
 - ✅ **TTS** (FR-30, FR-31): voz del sistema, reproducir/detener.
 - ✅ **Importación** (FR-44): `.md`, `.txt`, `.pdf` (texto), `.docx` y `.epub`, con inferencia de estructura para texto plano.
@@ -50,7 +52,7 @@ visualiza de forma automática, con ayuda de **IA local y ligera**.
 | FR-03 | M | Autoguardado continuo (debounce) y guardado manual (`Ctrl/Cmd+S`). |
 | FR-04 | M | Gestión de **proyectos** (novelas): crear, renombrar, abrir, duplicar, eliminar. |
 | FR-05 | S | Split-view (editor + vista previa renderizada). |
-| FR-06 | S | Historial local de versiones / snapshots (revertir a una versión anterior). |
+| FR-06 | S | Historial local de versiones / snapshots (revertir a una versión anterior). ✅ |
 | FR-07 | C | Modo foco / máquina de escribir (distraction-free). |
 | FR-08 | C | Objetivos de escritura (conteo de palabras diario). |
 | FR-09 | C | Atajos de teclado configurables. |

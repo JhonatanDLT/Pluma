@@ -1,8 +1,11 @@
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Row, params};
+use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, Result};
-use crate::models::{Chapter, Character, Entity, Project, Relationship, Scene, SceneMeta};
+use crate::models::{
+    Chapter, Character, Entity, NavEntry, Project, Relationship, Scene, SceneMeta, SnapshotMeta,
+};
 use crate::parser::ParsedManuscript;
 
 // ---------------------------------------------------------------------------
@@ -19,13 +22,14 @@ pub fn create_project(conn: &Connection, title: &str) -> Result<Project> {
 
     let project = Project::new(title);
     conn.execute(
-        "INSERT INTO project (id, title, author, description, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        "INSERT INTO project (id, title, author, description, word_goal, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
         params![
             project.id,
             project.title,
             project.author,
             project.description,
+            project.word_goal,
             project.created_at
         ],
     )?;
@@ -34,7 +38,7 @@ pub fn create_project(conn: &Connection, title: &str) -> Result<Project> {
 
 pub fn list_projects(conn: &Connection) -> Result<Vec<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, author, description, created_at, updated_at
+        "SELECT id, title, author, description, word_goal, created_at, updated_at
          FROM project ORDER BY updated_at DESC",
     )?;
     let projects = stmt
@@ -45,7 +49,7 @@ pub fn list_projects(conn: &Connection) -> Result<Vec<Project>> {
 
 pub fn get_project(conn: &Connection, id: &str) -> Result<Option<Project>> {
     conn.query_row(
-        "SELECT id, title, author, description, created_at, updated_at
+        "SELECT id, title, author, description, word_goal, created_at, updated_at
          FROM project WHERE id = ?1",
         params![id],
         project_from_row,
@@ -79,6 +83,23 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<()> {
         return Err(AppError::NotFound(format!("proyecto {id}")));
     }
     Ok(())
+}
+
+pub fn update_project_goal(conn: &Connection, id: &str, goal: i64) -> Result<Project> {
+    if goal <= 0 {
+        return Err(AppError::Validation(
+            "el objetivo debe ser mayor que cero".into(),
+        ));
+    }
+    let updated_at = Utc::now().to_rfc3339();
+    let affected = conn.execute(
+        "UPDATE project SET word_goal = ?1, updated_at = ?2 WHERE id = ?3",
+        params![goal, updated_at, id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("proyecto {id}")));
+    }
+    get_project(conn, id)?.ok_or_else(|| AppError::NotFound(format!("proyecto {id}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -250,14 +271,24 @@ pub fn import_manuscript(
         params![project_id],
     )?;
 
+    // Sentencias preparadas: evitan recompilar el SQL por cada fila, lo que
+    // importa al migrar novelas con cientos o miles de escenas.
     let mut imported = Vec::with_capacity(manuscript.chapters.len());
-
-    for (chapter_idx, parsed_chapter) in manuscript.chapters.iter().enumerate() {
-        let chapter = Chapter::new(project_id, &parsed_chapter.title, (chapter_idx + 1) as i64);
-        tx.execute(
+    {
+        let mut insert_chapter = tx.prepare(
             "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
+        )?;
+        let mut insert_scene = tx.prepare(
+            "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary, word_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+        )?;
+        let mut update_chapter_words =
+            tx.prepare("UPDATE chapter SET word_count = ?1 WHERE id = ?2")?;
+
+        for (chapter_idx, parsed_chapter) in manuscript.chapters.iter().enumerate() {
+            let chapter = Chapter::new(project_id, &parsed_chapter.title, (chapter_idx + 1) as i64);
+            insert_chapter.execute(params![
                 chapter.id,
                 chapter.project_id,
                 chapter.position,
@@ -265,20 +296,16 @@ pub fn import_manuscript(
                 chapter.status,
                 chapter.summary,
                 chapter.word_count
-            ],
-        )?;
+            ])?;
 
-        let mut chapter_word_count = 0i64;
-        for (scene_idx, parsed_scene) in parsed_chapter.scenes.iter().enumerate() {
-            let title = parsed_scene.title.clone();
-            let scene = Scene::new(&chapter.id, (scene_idx + 1) as i64, title);
-            let word_count = count_words(&parsed_scene.content);
-            chapter_word_count += word_count;
+            let mut chapter_word_count = 0i64;
+            for (scene_idx, parsed_scene) in parsed_chapter.scenes.iter().enumerate() {
+                let title = parsed_scene.title.clone();
+                let scene = Scene::new(&chapter.id, (scene_idx + 1) as i64, title);
+                let word_count = count_words(&parsed_scene.content);
+                chapter_word_count += word_count;
 
-            tx.execute(
-                "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary, word_count, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-                params![
+                insert_scene.execute(params![
                     scene.id,
                     scene.chapter_id,
                     scene.position,
@@ -287,16 +314,12 @@ pub fn import_manuscript(
                     scene.summary,
                     word_count,
                     scene.created_at
-                ],
-            )?;
+                ])?;
+            }
+
+            update_chapter_words.execute(params![chapter_word_count, chapter.id])?;
+            imported.push(chapter);
         }
-
-        tx.execute(
-            "UPDATE chapter SET word_count = ?1 WHERE id = ?2",
-            params![chapter_word_count, chapter.id],
-        )?;
-
-        imported.push(chapter);
     }
 
     tx.commit()?;
@@ -420,6 +443,29 @@ pub fn get_project_content(
         content.push((chapter, scenes));
     }
     Ok(content)
+}
+
+/// Índice plano de navegación: una fila por escena (con su capítulo) y una fila
+/// por capítulo sin escenas. Útil para el conmutador rápido y la navegación por
+/// teclado sin tener que recorrer el árbol completo.
+pub fn list_navigation(conn: &Connection, project_id: &str) -> Result<Vec<NavEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.title, s.id, s.title
+         FROM chapter c LEFT JOIN scene s ON s.chapter_id = c.id
+         WHERE c.project_id = ?1
+         ORDER BY c.position ASC, s.position ASC",
+    )?;
+    let entries = stmt
+        .query_map(params![project_id], |row| {
+            Ok(NavEntry {
+                chapter_id: row.get(0)?,
+                chapter_title: row.get(1)?,
+                scene_id: row.get(2)?,
+                scene_title: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(entries)
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +632,232 @@ pub fn delete_entity(conn: &Connection, id: &str) -> Result<()> {
 }
 
 // --------------------------------------------------------------------------
+// Versiones (snapshots) y huellas de cambio
+// --------------------------------------------------------------------------
+
+/// Huella SHA-256 del estado del proyecto (contenido de todas sus escenas).
+/// Se usa para detectar si algo cambió sin comparar el texto completo.
+pub fn project_fingerprint(conn: &Connection, project_id: &str) -> Result<String> {
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.content_markdown
+         FROM scene s JOIN chapter c ON s.chapter_id = c.id
+         WHERE c.project_id = ?1 ORDER BY s.id ASC",
+    )?;
+    let mut hasher = Sha256::new();
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (id, content) = row?;
+        hasher.update(id.as_bytes());
+        hasher.update(b":");
+        hasher.update(content.as_bytes());
+        hasher.update(b"\n");
+    }
+    Ok(hex(&hasher.finalize()))
+}
+
+pub fn get_project_fingerprint(conn: &Connection, project_id: &str) -> Result<Option<String>> {
+    let result: Option<Option<String>> = conn
+        .query_row(
+            "SELECT analysis_fingerprint FROM project WHERE id = ?1",
+            params![project_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    Ok(result.flatten())
+}
+
+pub fn set_project_fingerprint(
+    conn: &Connection,
+    project_id: &str,
+    fingerprint: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE project SET analysis_fingerprint = ?1 WHERE id = ?2",
+        params![fingerprint, project_id],
+    )?;
+    Ok(())
+}
+
+/// Crea una versión (snapshot) completa del proyecto. Si nada cambió desde la
+/// última versión, devuelve un error de validación para evitar duplicados.
+pub fn create_snapshot(
+    conn: &mut Connection,
+    project_id: &str,
+    message: Option<String>,
+) -> Result<SnapshotMeta> {
+    let fingerprint = project_fingerprint(conn, project_id)?;
+
+    let latest: Option<String> = conn
+        .query_row(
+            "SELECT fingerprint FROM snapshot WHERE project_id = ?1
+             ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            params![project_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if latest.as_deref() == Some(fingerprint.as_str()) {
+        return Err(AppError::Validation(
+            "no hay cambios desde la última versión".into(),
+        ));
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let created_at = Utc::now().to_rfc3339();
+
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO snapshot (id, project_id, message, fingerprint, scene_count, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, project_id, message, fingerprint, 0, created_at],
+    )?;
+
+    let mut scene_count = 0i64;
+    {
+        let mut stmt = tx.prepare(
+            "SELECT s.id, s.chapter_id, s.position, s.title, s.content_markdown
+             FROM scene s JOIN chapter c ON s.chapter_id = c.id WHERE c.project_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut insert = tx.prepare(
+            "INSERT INTO snapshot_scene (snapshot_id, scene_id, chapter_id, position, title, content_markdown)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for row in rows {
+            let (scene_id, chapter_id, position, title, content) = row?;
+            insert.execute(params![id, scene_id, chapter_id, position, title, content])?;
+            scene_count += 1;
+        }
+    }
+
+    tx.execute(
+        "UPDATE snapshot SET scene_count = ?1 WHERE id = ?2",
+        params![scene_count, id],
+    )?;
+    tx.commit()?;
+
+    Ok(SnapshotMeta {
+        id,
+        project_id: project_id.to_string(),
+        message,
+        scene_count,
+        created_at,
+    })
+}
+
+pub fn list_snapshots(conn: &Connection, project_id: &str) -> Result<Vec<SnapshotMeta>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, message, scene_count, created_at
+         FROM snapshot WHERE project_id = ?1 ORDER BY created_at DESC",
+    )?;
+    let snapshots = stmt
+        .query_map(params![project_id], |row| {
+            Ok(SnapshotMeta {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                message: row.get(2)?,
+                scene_count: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(snapshots)
+}
+
+/// Restaura el contenido de las escenas guardadas en una versión. Las escenas que
+/// aún existen se sobrescriben; las que fueron eliminadas se recrean si su capítulo
+/// sigue existiendo. No borra escenas creadas después de la versión.
+pub fn restore_snapshot(conn: &mut Connection, snapshot_id: &str) -> Result<()> {
+    let tx = conn.transaction()?;
+
+    let scenes = {
+        let mut stmt = tx.prepare(
+            "SELECT scene_id, chapter_id, position, title, content_markdown
+             FROM snapshot_scene WHERE snapshot_id = ?1",
+        )?;
+        stmt.query_map(params![snapshot_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    if scenes.is_empty() {
+        return Err(AppError::NotFound(format!("versión {snapshot_id}")));
+    }
+
+    let now = Utc::now().to_rfc3339();
+    for (scene_id, chapter_id, position, title, content) in scenes {
+        let word_count = count_words(&content);
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM scene WHERE id = ?1",
+                params![scene_id],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if exists {
+            tx.execute(
+                "UPDATE scene SET content_markdown = ?1, title = ?2, position = ?3, word_count = ?4, updated_at = ?5 WHERE id = ?6",
+                params![content, title, position, word_count, now, scene_id],
+            )?;
+        } else {
+            let chapter_exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM chapter WHERE id = ?1",
+                    params![chapter_id],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if chapter_exists {
+                tx.execute(
+                    "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary, word_count, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?7)",
+                    params![scene_id, chapter_id, position, title, content, word_count, now],
+                )?;
+            }
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn delete_snapshot(conn: &Connection, snapshot_id: &str) -> Result<()> {
+    let affected = conn.execute("DELETE FROM snapshot WHERE id = ?1", params![snapshot_id])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("versión {snapshot_id}")));
+    }
+    Ok(())
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0xf) as usize] as char);
+    }
+    out
+}
+
+// --------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -622,8 +894,9 @@ fn project_from_row(row: &Row<'_>) -> rusqlite::Result<Project> {
         title: row.get(1)?,
         author: row.get(2)?,
         description: row.get(3)?,
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
+        word_goal: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 
@@ -719,4 +992,80 @@ fn parse_json_list(raw: Option<String>) -> Vec<String> {
 
 fn json<T: serde::Serialize>(value: T) -> String {
     serde_json::to_string(&value).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seed(conn: &Connection) -> (Project, Chapter, Scene) {
+        let project = Project::new("Mi novela");
+        conn.execute(
+            "INSERT INTO project (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+            params![project.id, project.title, project.created_at],
+        )
+        .unwrap();
+
+        let chapter = Chapter::new(&project.id, "Cap 1", 1);
+        conn.execute(
+            "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
+             VALUES (?1, ?2, ?3, ?4, 'draft', NULL, 0)",
+            params![
+                chapter.id,
+                chapter.project_id,
+                chapter.position,
+                chapter.title
+            ],
+        )
+        .unwrap();
+
+        let scene = Scene::new(&chapter.id, 1, None);
+        conn.execute(
+            "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary, word_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, 'hola', NULL, 1, ?4, ?4)",
+            params![scene.id, scene.chapter_id, scene.position, scene.created_at],
+        )
+        .unwrap();
+
+        (project, chapter, scene)
+    }
+
+    #[test]
+    fn snapshots_detect_changes_and_restore() {
+        let mut conn = crate::db::test_connection();
+        let (project, _chapter, scene) = seed(&conn);
+
+        // La huella de análisis es NULL hasta el primer análisis: no debe fallar.
+        assert_eq!(get_project_fingerprint(&conn, &project.id).unwrap(), None);
+
+        let s1 = create_snapshot(&mut conn, &project.id, None).unwrap();
+        assert_eq!(s1.scene_count, 1);
+
+        // Sin cambios → no se crea una versión duplicada.
+        assert!(create_snapshot(&mut conn, &project.id, None).is_err());
+
+        conn.execute(
+            "UPDATE scene SET content_markdown = 'hola mundo' WHERE id = ?1",
+            params![scene.id],
+        )
+        .unwrap();
+        let s2 = create_snapshot(&mut conn, &project.id, None).unwrap();
+        assert_ne!(s1.id, s2.id);
+
+        // Restaurar la primera versión recupera el contenido original.
+        conn.execute(
+            "UPDATE scene SET content_markdown = 'cambiado' WHERE id = ?1",
+            params![scene.id],
+        )
+        .unwrap();
+        restore_snapshot(&mut conn, &s1.id).unwrap();
+        let content: String = conn
+            .query_row(
+                "SELECT content_markdown FROM scene WHERE id = ?1",
+                params![scene.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(content, "hola");
+    }
 }

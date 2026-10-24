@@ -11,7 +11,8 @@ use crate::export;
 use crate::extract;
 use crate::llm;
 use crate::models::{
-    AnalysisReport, Chapter, Character, Entity, Project, Relationship, Scene, SceneMeta,
+    AnalysisReport, Chapter, Character, Entity, NavEntry, Project, Relationship, Scene, SceneMeta,
+    SnapshotMeta,
 };
 use crate::nlp;
 use crate::parser;
@@ -31,6 +32,19 @@ fn lock<'a>(db: &'a State<'_, Db>) -> Result<MutexGuard<'a, Connection>> {
 fn lock_model<T>(m: &std::sync::Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>> {
     m.lock()
         .map_err(|_| AppError::Internal("estado de modelos corrupto".into()))
+}
+
+/// Huella SHA-256 de un conjunto de textos (para detectar cambios sin comparar
+/// el contenido completo).
+fn hash_texts(texts: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for text in texts {
+        hasher.update(text.as_bytes());
+        hasher.update(b"\n");
+    }
+    let digest = hasher.finalize();
+    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +73,12 @@ pub fn rename_project(db: State<'_, Db>, id: String, title: String) -> Result<Pr
 pub fn delete_project(db: State<'_, Db>, id: String) -> Result<()> {
     let conn = lock(&db)?;
     repo::delete_project(&conn, &id)
+}
+
+#[tauri::command]
+pub fn update_project_goal(db: State<'_, Db>, id: String, goal: i64) -> Result<Project> {
+    let conn = lock(&db)?;
+    repo::update_project_goal(&conn, &id, goal)
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +117,12 @@ pub fn delete_chapter(db: State<'_, Db>, id: String) -> Result<()> {
 pub fn list_scenes(db: State<'_, Db>, chapter_id: String) -> Result<Vec<SceneMeta>> {
     let conn = lock(&db)?;
     repo::list_scenes(&conn, &chapter_id)
+}
+
+#[tauri::command]
+pub fn list_navigation(db: State<'_, Db>, project_id: String) -> Result<Vec<NavEntry>> {
+    let conn = lock(&db)?;
+    repo::list_navigation(&conn, &project_id)
 }
 
 #[tauri::command]
@@ -147,6 +173,26 @@ pub fn import_file(db: State<'_, Db>, project_id: String, path: String) -> Resul
     let manuscript = parser::parse(&markdown);
     let mut guard = lock(&db)?;
     repo::import_manuscript(&mut *guard, &project_id, &manuscript)
+}
+
+/// Crea un proyecto nuevo a partir de un archivo (PDF, EPUB, DOCX, TXT, …),
+/// usando el nombre del archivo como título del proyecto.
+#[tauri::command]
+pub fn import_file_as_project(db: State<'_, Db>, path: String) -> Result<Project> {
+    let path = std::path::Path::new(&path);
+    let title = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Documento importado");
+
+    let markdown = extract::extract_markdown(path)?;
+    let manuscript = parser::parse(&markdown);
+
+    let mut guard = lock(&db)?;
+    let project = repo::create_project(&guard, title)?;
+    repo::import_manuscript(&mut *guard, &project.id, &manuscript)?;
+    Ok(project)
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +334,23 @@ pub fn analyze_project(
             .collect()
     };
 
+    // Atajo de rendimiento: si el manuscrito no cambió desde el último análisis,
+    // devuelve los resultados guardados sin volver a ejecutar NER/embeddings.
+    let fingerprint = hash_texts(&texts);
+    {
+        let guard = lock(&db)?;
+        if repo::get_project_fingerprint(&guard, &project_id)?.as_deref()
+            == Some(fingerprint.as_str())
+            && !repo::list_characters(&guard, &project_id)?.is_empty()
+        {
+            return Ok(AnalysisReport {
+                characters: repo::list_characters(&guard, &project_id)?,
+                relationships: repo::list_relationships(&guard, &project_id)?,
+                entities: repo::list_entities(&guard, &project_id)?,
+            });
+        }
+    }
+
     // Los motores pesados solo se cargan si el runtime de ONNX Runtime está
     // disponible; en caso contrario se usan exclusivamente las reglas locales.
     let onnxrt_ready = crate::runtime::is_available(&data_dir);
@@ -382,6 +445,7 @@ pub fn analyze_project(
     repo::replace_characters(&mut *guard, &project_id, &characters)?;
     repo::replace_relationships(&mut *guard, &project_id, &relationships)?;
     repo::replace_entities(&mut *guard, &project_id, &entities)?;
+    repo::set_project_fingerprint(&guard, &project_id, Some(&fingerprint))?;
 
     Ok(AnalysisReport {
         characters,
@@ -420,6 +484,38 @@ pub fn enrich_project(
 pub fn correct_text(text: String, model: Option<String>) -> Result<String> {
     let model = model.unwrap_or_else(|| llm::DEFAULT_MODEL.to_string());
     llm::correct_grammar(&model, &text)
+}
+
+// ---------------------------------------------------------------------------
+// Versiones (snapshots)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn create_snapshot(
+    db: State<'_, Db>,
+    project_id: String,
+    message: Option<String>,
+) -> Result<SnapshotMeta> {
+    let mut conn = lock(&db)?;
+    repo::create_snapshot(&mut conn, &project_id, message)
+}
+
+#[tauri::command]
+pub fn list_snapshots(db: State<'_, Db>, project_id: String) -> Result<Vec<SnapshotMeta>> {
+    let conn = lock(&db)?;
+    repo::list_snapshots(&conn, &project_id)
+}
+
+#[tauri::command]
+pub fn restore_snapshot(db: State<'_, Db>, snapshot_id: String) -> Result<()> {
+    let mut conn = lock(&db)?;
+    repo::restore_snapshot(&mut conn, &snapshot_id)
+}
+
+#[tauri::command]
+pub fn delete_snapshot(db: State<'_, Db>, snapshot_id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::delete_snapshot(&conn, &snapshot_id)
 }
 
 // ---------------------------------------------------------------------------

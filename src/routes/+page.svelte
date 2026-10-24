@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Sidebar from "$lib/components/Sidebar.svelte";
+  import ProjectsView from "$lib/components/ProjectsView.svelte";
+  import ChaptersPanel from "$lib/components/ChaptersPanel.svelte";
+  import ScenesPanel from "$lib/components/ScenesPanel.svelte";
   import Editor from "$lib/components/Editor.svelte";
   import SourceEditor from "$lib/components/SourceEditor.svelte";
-  import MetadataPanel from "$lib/components/MetadataPanel.svelte";
-  import CharactersPanel from "$lib/components/CharactersPanel.svelte";
+  import OptionsPanel from "$lib/components/OptionsPanel.svelte";
+  import QuickSwitcher from "$lib/components/QuickSwitcher.svelte";
   import * as api from "$lib/api";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import type {
@@ -13,11 +15,13 @@
     EditorMode,
     Entity,
     IaStatus,
+    NavEntry,
     Project,
     Relationship,
     SaveState,
     Scene,
     SceneMeta,
+    SnapshotMeta,
   } from "$lib/types";
 
   let projects = $state<Project[]>([]);
@@ -44,9 +48,43 @@
   let correcting = $state(false);
   let editorRevision = $state(0);
   let iaStatus = $state<IaStatus | null>(null);
-  let showMeta = $state(false);
-  let showChars = $state(false);
+  let snapshots = $state<SnapshotMeta[]>([]);
+  let snapshotBusy = $state(false);
+  let navigation = $state<NavEntry[]>([]);
+  let switcherOpen = $state(false);
   let exportOpen = $state(false);
+
+  // Paneles redimensionables / colapsables (persistidos entre sesiones).
+  function loadNum(key: string, fallback: number): number {
+    const v = localStorage.getItem(key);
+    if (v === null) return fallback;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function loadBool(key: string, fallback: boolean): boolean {
+    const v = localStorage.getItem(key);
+    if (v === null) return fallback;
+    return v === "true";
+  }
+
+  let chaptersWidth = $state(loadNum("pluma.chaptersWidth", 240));
+  let scenesWidth = $state(loadNum("pluma.scenesWidth", 220));
+  let optionsWidth = $state(loadNum("pluma.optionsWidth", 300));
+  let chaptersCollapsed = $state(loadBool("pluma.chaptersCollapsed", false));
+  let scenesCollapsed = $state(loadBool("pluma.scenesCollapsed", false));
+  let optionsOpen = $state(loadBool("pluma.optionsOpen", true));
+  let viewMode = $state<"split" | "tree">(
+    localStorage.getItem("pluma.viewMode") === "tree" ? "tree" : "split",
+  );
+  let projectsFocusSignal = $state(0);
+
+  $effect(() => localStorage.setItem("pluma.chaptersWidth", String(chaptersWidth)));
+  $effect(() => localStorage.setItem("pluma.scenesWidth", String(scenesWidth)));
+  $effect(() => localStorage.setItem("pluma.optionsWidth", String(optionsWidth)));
+  $effect(() => localStorage.setItem("pluma.chaptersCollapsed", String(chaptersCollapsed)));
+  $effect(() => localStorage.setItem("pluma.scenesCollapsed", String(scenesCollapsed)));
+  $effect(() => localStorage.setItem("pluma.optionsOpen", String(optionsOpen)));
+  $effect(() => localStorage.setItem("pluma.viewMode", viewMode));
 
   let saveTimer: number | undefined;
 
@@ -70,6 +108,47 @@
   onMount(async () => {
     await loadProjects();
     await loadIaStatus();
+  });
+
+  onMount(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (selectedProjectId) {
+          switcherOpen = !switcherOpen;
+        } else {
+          projectsFocusSignal++;
+        }
+        return;
+      }
+      if (mod && e.altKey) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          nextChapter();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          prevChapter();
+          return;
+        }
+      }
+      if (mod && e.shiftKey && !e.altKey) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          nextScene();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          prevScene();
+          return;
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   async function loadProjects() {
@@ -104,6 +183,8 @@
     characters = await api.listCharacters(id);
     relationships = await api.listRelationships(id);
     entities = await api.listEntities(id);
+    snapshots = await api.listSnapshots(id);
+    navigation = await api.listNavigation(id);
   }
 
   async function selectChapter(id: string) {
@@ -125,6 +206,110 @@
     sceneTitle = scene.title;
     currentScene = scene;
     selectedSceneId = id;
+  }
+
+  // -------------------------------------------------------------------------
+  // Navegación (teclado y conmutador rápido)
+  // -------------------------------------------------------------------------
+
+  async function goToChapter(id: string) {
+    await selectChapter(id);
+    if (scenes.length > 0) {
+      await selectScene(scenes[0].id);
+    }
+  }
+
+  async function goToSceneInChapter(chapterId: string, sceneId: string) {
+    if (chapterId !== selectedChapterId) {
+      await selectChapter(chapterId);
+    }
+    await selectScene(sceneId);
+  }
+
+  async function handleQuickSelect(entry: NavEntry) {
+    switcherOpen = false;
+    if (entry.scene_id) {
+      await goToSceneInChapter(entry.chapter_id, entry.scene_id);
+    } else {
+      await goToChapter(entry.chapter_id);
+    }
+  }
+
+  async function nextChapter() {
+    if (!selectedChapterId || chapters.length === 0) return;
+    const i = chapters.findIndex((c) => c.id === selectedChapterId);
+    const next = chapters[Math.min(i + 1, chapters.length - 1)];
+    if (next && next.id !== selectedChapterId) await goToChapter(next.id);
+  }
+
+  async function prevChapter() {
+    if (!selectedChapterId || chapters.length === 0) return;
+    const i = chapters.findIndex((c) => c.id === selectedChapterId);
+    const prev = chapters[Math.max(i - 1, 0)];
+    if (prev && prev.id !== selectedChapterId) await goToChapter(prev.id);
+  }
+
+  function sceneEntries(): NavEntry[] {
+    return navigation.filter((e) => e.scene_id !== null);
+  }
+
+  async function nextScene() {
+    if (!selectedSceneId) return;
+    const entries = sceneEntries();
+    if (entries.length === 0) return;
+    const i = entries.findIndex((e) => e.scene_id === selectedSceneId);
+    if (i === -1) return;
+    const next = entries[Math.min(i + 1, entries.length - 1)];
+    if (next && next.scene_id !== selectedSceneId && next.scene_id) {
+      await goToSceneInChapter(next.chapter_id, next.scene_id);
+    }
+  }
+
+  async function prevScene() {
+    if (!selectedSceneId) return;
+    const entries = sceneEntries();
+    if (entries.length === 0) return;
+    const i = entries.findIndex((e) => e.scene_id === selectedSceneId);
+    if (i === -1) return;
+    const prev = entries[Math.max(i - 1, 0)];
+    if (prev && prev.scene_id !== selectedSceneId && prev.scene_id) {
+      await goToSceneInChapter(prev.chapter_id, prev.scene_id);
+    }
+  }
+
+  async function backToProjects() {
+    await flushSave();
+    selectedProjectId = null;
+    selectedChapterId = null;
+    selectedSceneId = null;
+    sceneContent = "";
+    sceneTitle = null;
+    currentScene = null;
+    chapters = [];
+    scenes = [];
+    navigation = [];
+  }
+
+  function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function beginDrag(which: "chapters" | "scenes" | "options") {
+    const move = (e: MouseEvent) => {
+      if (which === "chapters") chaptersWidth = clamp(e.clientX, 140, 520);
+      else if (which === "scenes") scenesWidth = clamp(e.clientX, 140, 520);
+      else if (which === "options") optionsWidth = clamp(window.innerWidth - e.clientX, 240, 640);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
   }
 
   // -------------------------------------------------------------------------
@@ -267,6 +452,32 @@
     }
   }
 
+  async function importProject() {
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        title: "Importar proyecto (PDF, EPUB, DOCX, TXT…)",
+        filters: [
+          {
+            name: "Documentos",
+            extensions: ["pdf", "epub", "docx", "md", "markdown", "txt"],
+          },
+        ],
+      });
+      if (typeof selected !== "string") return;
+
+      importing = true;
+      const project = await api.importFileAsProject(selected);
+      projects = await api.listProjects();
+      await selectProject(project.id);
+    } catch (e) {
+      reportError(e);
+    } finally {
+      importing = false;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Metadatos
   // -------------------------------------------------------------------------
@@ -322,6 +533,30 @@
     if (!selectedChapterId) return;
     try {
       scenes = await api.moveScene(selectedChapterId, id, index);
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function moveSceneInChapter(chapterId: string, id: string, index: number) {
+    try {
+      const result = await api.moveScene(chapterId, id, index);
+      if (chapterId === selectedChapterId) {
+        scenes = result;
+      }
+      if (selectedProjectId) {
+        navigation = await api.listNavigation(selectedProjectId);
+      }
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateProjectGoal(goal: number) {
+    if (!selectedProjectId) return;
+    try {
+      await api.updateProjectGoal(selectedProjectId, goal);
+      projects = await api.listProjects();
     } catch (e) {
       reportError(e);
     }
@@ -507,6 +742,62 @@
   }
 
   // -------------------------------------------------------------------------
+  // Versiones (snapshots)
+  // -------------------------------------------------------------------------
+
+  async function loadSnapshots() {
+    if (!selectedProjectId) return;
+    snapshots = await api.listSnapshots(selectedProjectId);
+  }
+
+  async function createSnapshot(message: string | null) {
+    if (!selectedProjectId) return;
+    snapshotBusy = true;
+    try {
+      await api.createSnapshot(selectedProjectId, message);
+      await loadSnapshots();
+    } catch (e) {
+      reportError(e);
+    } finally {
+      snapshotBusy = false;
+    }
+  }
+
+  async function restoreSnapshot(id: string) {
+    try {
+      await api.restoreSnapshot(id);
+      if (selectedProjectId) {
+        chapters = await api.listChapters(selectedProjectId);
+        scenes = [];
+        if (selectedChapterId && selectedSceneId) {
+          const scene = await api.getScene(selectedSceneId);
+          sceneContent = scene.content_markdown;
+          sceneTitle = scene.title;
+          currentScene = scene;
+          editorRevision++;
+        } else {
+          selectedChapterId = null;
+          sceneContent = "";
+          sceneTitle = null;
+          currentScene = null;
+        }
+        await loadSnapshots();
+      }
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function deleteSnapshot(id: string) {
+    try {
+      await api.deleteSnapshot(id);
+      await loadSnapshots();
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Autoguardado
   // -------------------------------------------------------------------------
 
@@ -549,41 +840,71 @@
 </script>
 
 <div class="app-shell">
-  <Sidebar
-    {projects}
-    {chapters}
-    {scenes}
-    {selectedProjectId}
-    {selectedChapterId}
-    {selectedSceneId}
-    onselectproject={selectProject}
-    onselectchapter={selectChapter}
-    onselectscene={selectScene}
-    oncreateproject={createProject}
-    oncreatechapter={createChapter}
-    oncreatescene={createScene}
-    ondeleteproject={deleteProject}
-    ondeletechapter={deleteChapter}
-    ondeletescene={deleteScene}
-    onmovechapter={moveChapter}
-    onmovescene={moveScene}
-  />
+  {#if !selectedProjectId}
+    <ProjectsView
+      {projects}
+      focusSignal={projectsFocusSignal}
+      onselectproject={selectProject}
+      oncreateproject={createProject}
+      ondeleteproject={deleteProject}
+      onimportproject={importProject}
+    />
+  {:else}
+    <div class="workspace">
+      {#if !chaptersCollapsed}
+        <aside class="panel" style:width="{chaptersWidth}px">
+          <ChaptersPanel
+            {chapters}
+            {navigation}
+            {selectedChapterId}
+            {selectedSceneId}
+            wordGoal={selectedProject?.word_goal ?? 3000}
+            onselectchapter={selectChapter}
+            onselectscene={selectScene}
+            oncreatechapter={createChapter}
+            ondeletechapter={deleteChapter}
+            onmovechapter={moveChapter}
+            onmovescene={moveSceneInChapter}
+            onupdategoal={updateProjectGoal}
+            ontoggle={() => (chaptersCollapsed = true)}
+          />
+        </aside>
+        <button class="divider" type="button" aria-label="Ajustar ancho" onmousedown={() => beginDrag("chapters")}></button>
+      {:else}
+        <button class="collapsed-tab" onclick={() => (chaptersCollapsed = false)}>Capítulos</button>
+      {/if}
 
-  <main class="main">
+      {#if viewMode === "split"}
+        {#if !scenesCollapsed}
+          <aside class="panel" style:width="{scenesWidth}px">
+            <ScenesPanel
+              {scenes}
+              {selectedSceneId}
+              onselectscene={selectScene}
+              oncreatescene={createScene}
+              ondeletescene={deleteScene}
+              onmovescene={moveScene}
+              ontoggle={() => (scenesCollapsed = true)}
+            />
+          </aside>
+          <button class="divider" type="button" aria-label="Ajustar ancho" onmousedown={() => beginDrag("scenes")}></button>
+        {:else}
+          <button class="collapsed-tab" onclick={() => (scenesCollapsed = false)}>Escenas</button>
+        {/if}
+      {/if}
+
+      <main class="main">
     <header class="topbar">
       <div class="crumbs">
-        {#if selectedProject}
-          <span class="crumb">{selectedProject.title}</span>
-          {#if selectedChapter}
-            <span class="sep">›</span>
-            <span class="crumb">{selectedChapter.title}</span>
-          {/if}
-          {#if selectedSceneId}
-            <span class="sep">›</span>
-            <span class="crumb muted">{sceneTitle ?? "Escena"}</span>
-          {/if}
-        {:else}
-          <span class="crumb muted">Sin proyecto</span>
+        <button class="btn-icon" title="Volver a proyectos" onclick={backToProjects}>‹</button>
+        <span class="crumb">{selectedProject?.title}</span>
+        {#if selectedChapter}
+          <span class="sep">›</span>
+          <span class="crumb">{selectedChapter.title}</span>
+        {/if}
+        {#if selectedSceneId}
+          <span class="sep">›</span>
+          <span class="crumb muted">{sceneTitle ?? "Escena"}</span>
         {/if}
       </div>
 
@@ -599,18 +920,6 @@
           >{correcting ? "Corrigiendo…" : "Corregir"}</button>
         {/if}
 
-        <button
-          class="btn btn-toggle"
-          class:active={showMeta}
-          onclick={() => (showMeta = !showMeta)}
-        >Metadatos</button>
-
-        <button
-          class="btn btn-toggle"
-          class:active={showChars}
-          onclick={() => (showChars = !showChars)}
-        >Personajes</button>
-
         <div class="dropdown">
           <button class="btn" onclick={() => (exportOpen = !exportOpen)}>Exportar</button>
           {#if exportOpen}
@@ -624,11 +933,16 @@
           {/if}
         </div>
 
-        {#if selectedProjectId}
-          <button class="btn" onclick={importManuscript} disabled={importing}>
-            {importing ? "Importando…" : "Importar"}
-          </button>
-        {/if}
+        <button class="btn" onclick={importManuscript} disabled={importing}>
+          {importing ? "Importando…" : "Importar"}
+        </button>
+
+        <button
+          class="btn btn-toggle"
+          class:active={optionsOpen}
+          onclick={() => (optionsOpen = !optionsOpen)}
+          title="Panel de personajes, metadatos y versiones"
+        >Panel</button>
 
         {#if selectedSceneId}
           <span class="wordcount">{wordCount.toLocaleString()} palabras</span>
@@ -650,6 +964,17 @@
             onclick={() => (mode = "source")}
           >Markdown</button>
         </div>
+
+        <div class="segmented" title="Modo de visualización de capítulos y escenas">
+          <button
+            class:active={viewMode === "split"}
+            onclick={() => (viewMode = "split")}
+          >Separado</button>
+          <button
+            class:active={viewMode === "tree"}
+            onclick={() => (viewMode = "tree")}
+          >Árbol</button>
+        </div>
       </div>
     </header>
 
@@ -658,15 +983,6 @@
         <span>{errorMsg}</span>
         <button class="btn-icon" onclick={() => (errorMsg = null)}>×</button>
       </div>
-    {/if}
-
-    {#if showMeta}
-      <MetadataPanel
-        chapter={selectedChapter}
-        scene={currentScene}
-        onsavechapter={saveChapterMeta}
-        onsavescene={saveSceneMeta}
-      />
     {/if}
 
     <div class="editor-area">
@@ -691,27 +1007,50 @@
     </div>
   </main>
 
-  {#if showChars}
-    <aside class="right-panel">
-      <CharactersPanel
-        {characters}
-        {relationships}
-        {entities}
-        {analyzing}
-        {enriching}
-        {iaStatus}
-        onanalyze={analyze}
-        onenrich={enrich}
-        ondeletecharacter={deleteCharacter}
-        ondeleteentity={deleteEntity}
-        onupdateembeddings={updateEmbeddings}
-        oninstallembeddings={installEmbeddings}
-        onupdatenerengine={updateNerEngine}
-        oninstallgliner={installGliner}
-        oninstallonnxruntime={installOnnxRuntime}
-        onupdatekeeploaded={updateKeepLoaded}
-      />
-    </aside>
+      {#if optionsOpen}
+        <button class="divider" type="button" aria-label="Ajustar ancho" onmousedown={() => beginDrag("options")}></button>
+        <aside class="panel panel-right" style:width="{optionsWidth}px">
+          <OptionsPanel
+            chapter={selectedChapter}
+            scene={currentScene}
+            onsavechapter={saveChapterMeta}
+            onsavescene={saveSceneMeta}
+            {characters}
+            {relationships}
+            {entities}
+            {analyzing}
+            {enriching}
+            {iaStatus}
+            onanalyze={analyze}
+            onenrich={enrich}
+            ondeletecharacter={deleteCharacter}
+            ondeleteentity={deleteEntity}
+            onupdateembeddings={updateEmbeddings}
+            oninstallembeddings={installEmbeddings}
+            onupdatenerengine={updateNerEngine}
+            oninstallgliner={installGliner}
+            oninstallonnxruntime={installOnnxRuntime}
+            onupdatekeeploaded={updateKeepLoaded}
+            {snapshots}
+            snapshotBusy={snapshotBusy}
+            oncreatesnapshot={createSnapshot}
+            onrestoresnapshot={restoreSnapshot}
+            ondeletesnapshot={deleteSnapshot}
+            onloadsnapshots={loadSnapshots}
+          />
+        </aside>
+      {/if}
+    </div>
+  {/if}
+
+  {#if switcherOpen}
+    <QuickSwitcher
+      entries={navigation}
+      {selectedChapterId}
+      {selectedSceneId}
+      onselect={handleQuickSelect}
+      onclose={() => (switcherOpen = false)}
+    />
   {/if}
 </div>
 
@@ -721,6 +1060,57 @@
     height: 100vh;
     width: 100vw;
     overflow: hidden;
+  }
+
+  .workspace {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .panel {
+    flex-shrink: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+  }
+
+  .panel-right {
+    border-right: none;
+    border-left: 1px solid var(--border);
+  }
+
+  .divider {
+    flex-shrink: 0;
+    width: 4px;
+    cursor: col-resize;
+    background: transparent;
+    border: none;
+    padding: 0;
+    transition: background 0.12s;
+  }
+
+  .divider:hover {
+    background: var(--accent);
+  }
+
+  .collapsed-tab {
+    flex-shrink: 0;
+    writing-mode: vertical-rl;
+    font: inherit;
+    font-size: 12px;
+    padding: 10px 4px;
+    border: none;
+    border-right: 1px solid var(--border);
+    background: var(--bg-sidebar);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .collapsed-tab:hover {
+    color: var(--accent);
   }
 
   .main {
@@ -872,15 +1262,6 @@
     flex: 1;
     min-height: 0;
     position: relative;
-  }
-
-  .right-panel {
-    width: 280px;
-    min-width: 280px;
-    height: 100%;
-    background: var(--bg-sidebar);
-    border-left: 1px solid var(--border);
-    overflow-y: auto;
   }
 
   .empty {

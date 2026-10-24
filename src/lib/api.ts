@@ -6,10 +6,12 @@ import type {
   Entity,
   IaSettings,
   IaStatus,
+  NavEntry,
   Project,
   Relationship,
   Scene,
   SceneMeta,
+  SnapshotMeta,
 } from "./types";
 
 // Proyectos
@@ -20,6 +22,8 @@ export const renameProject = (id: string, title: string) =>
   invoke<Project>("rename_project", { id, title });
 export const deleteProject = (id: string) =>
   invoke<void>("delete_project", { id });
+export const updateProjectGoal = (id: string, goal: number) =>
+  invoke<Project>("update_project_goal", { id, goal });
 
 // Capítulos
 export const listChapters = (projectId: string) =>
@@ -34,6 +38,8 @@ export const deleteChapter = (id: string) =>
 // Escenas
 export const listScenes = (chapterId: string) =>
   invoke<SceneMeta[]>("list_scenes", { chapterId });
+export const listNavigation = (projectId: string) =>
+  invoke<NavEntry[]>("list_navigation", { projectId });
 export const createScene = (chapterId: string, title: string | null) =>
   invoke<Scene>("create_scene", { chapterId, title });
 export const getScene = (id: string) => invoke<Scene>("get_scene", { id });
@@ -46,6 +52,8 @@ export const importMarkdown = (projectId: string, markdown: string) =>
   invoke<Chapter[]>("import_markdown", { projectId, markdown });
 export const importFile = (projectId: string, path: string) =>
   invoke<Chapter[]>("import_file", { projectId, path });
+export const importFileAsProject = (path: string) =>
+  invoke<Project>("import_file_as_project", { path });
 
 // Metadatos
 export const updateChapterMeta = (
@@ -108,6 +116,16 @@ export const enrichProject = (projectId: string, model: string | null) =>
   invoke<Character[]>("enrich_project", { projectId, model });
 export const correctText = (text: string, model: string | null) =>
   invoke<string>("correct_text", { text, model });
+
+// Versiones (snapshots)
+export const createSnapshot = (projectId: string, message: string | null) =>
+  invoke<SnapshotMeta>("create_snapshot", { projectId, message });
+export const listSnapshots = (projectId: string) =>
+  invoke<SnapshotMeta[]>("list_snapshots", { projectId });
+export const restoreSnapshot = (snapshotId: string) =>
+  invoke<void>("restore_snapshot", { snapshotId });
+export const deleteSnapshot = (snapshotId: string) =>
+  invoke<void>("delete_snapshot", { snapshotId });
 
 // Configuración de IA (opt-in)
 export const iaStatus = () => invoke<IaStatus>("ia_status");

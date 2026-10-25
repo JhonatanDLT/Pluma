@@ -109,6 +109,10 @@ export interface IaSettings {
   ner_engine: string;
   embeddings: boolean;
   llm_model: string | null;
+  relationship_model: string | null;
+  cloud_provider: string | null;
+  cloud_api_key: string | null;
+  cloud_model: string | null;
   keep_loaded: boolean;
 }
 

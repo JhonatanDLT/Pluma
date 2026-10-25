@@ -15,6 +15,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0006_word_goal.sql"),
     include_str!("../migrations/0007_cover.sql"),
     include_str!("../migrations/0008_level_names.sql"),
+    include_str!("../migrations/0009_embeddings.sql"),
 ];
 
 /// Conexión a SQLite compartida entre comandos.

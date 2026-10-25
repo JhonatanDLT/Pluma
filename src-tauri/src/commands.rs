@@ -16,6 +16,7 @@ use crate::models::{
 };
 use crate::nlp;
 use crate::parser;
+use crate::rag;
 use crate::repo;
 use crate::settings::IaSettings;
 use crate::tts;
@@ -422,7 +423,7 @@ pub async fn analyze_project(
 
     emit_progress(&app, 0, texts.len(), "escenas");
 
-    let result = {
+    let mut result = {
         let mut embedder_guard = lock_model(&cache.embedder)?;
         let mut ner_guard = lock_model(&cache.gliner)?;
 
@@ -449,7 +450,28 @@ pub async fn analyze_project(
         });
 
         emit_progress(&app, texts.len(), texts.len(), "informe");
-        nlp::analyze_mentions(&texts, &mentions, embedder)
+        let analysis = nlp::analyze_mentions(&texts, &mentions, embedder);
+
+        // RAG: indexa las escenas del proyecto reutilizando el embedder ya
+        // cargado (evita una segunda carga del modelo).
+        if settings.embeddings {
+            if let Some(e) = embedder_guard.as_mut() {
+                let guard = lock(&db)?;
+                let content = repo::get_project_content(&guard, &project_id)?;
+                let scenes: Vec<(String, String)> = content
+                    .iter()
+                    .flat_map(|(_, scenes)| {
+                        scenes
+                            .iter()
+                            .map(|s| (s.id.clone(), s.content_markdown.clone()))
+                    })
+                    .filter(|(_, c)| !c.trim().is_empty())
+                    .collect();
+                let _ = rag::index_project(&guard, &project_id, &scenes, e);
+            }
+        }
+
+        analysis
     };
 
     // En el perfil de mínimo consumo, libera los modelos tras cada análisis.
@@ -459,6 +481,40 @@ pub async fn analyze_project(
         }
         if let Ok(mut g) = cache.gliner.lock() {
             *g = None;
+        }
+    }
+
+    // Tipado de relaciones (opt-in): rellena `kind` de cada relación detectada.
+    if let Some(model) = settings.relationship_model.as_deref() {
+        let backend = llm::resolve_backend(&settings, Some(model), llm::DEFAULT_MODEL);
+        // Ollama requiere estar disponible; la nube no.
+        let ready = match &backend {
+            llm::Backend::Ollama { .. } => ollama_available(),
+            llm::Backend::Cloud { .. } => true,
+        };
+        if ready {
+            emit_progress(&app, texts.len(), texts.len(), "relaciones");
+            let pairs: Vec<(String, String)> = result
+                .relationships
+                .iter()
+                .map(|r| (r.a.clone(), r.b.clone()))
+                .collect();
+            let context = texts.join("\n\n");
+            if let Ok(typed) = llm::type_relationships(&backend, &pairs, &context) {
+                for (a, b, kind) in typed {
+                    // «ninguna»/«none»/«mismo» = sin relación clara.
+                    if matches!(kind.as_str(), "ninguna" | "none" | "mismo") {
+                        continue;
+                    }
+                    if let Some(r) = result
+                        .relationships
+                        .iter_mut()
+                        .find(|r| (r.a == a && r.b == b) || (r.a == b && r.b == a))
+                    {
+                        r.kind = Some(kind);
+                    }
+                }
+            }
         }
     }
 
@@ -526,11 +582,13 @@ pub async fn analyze_project(
 /// Enriquece las descripciones de los personajes con un LLM local (Ollama).
 #[tauri::command]
 pub fn enrich_project(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     project_id: String,
     model: Option<String>,
 ) -> Result<Vec<Character>> {
-    let model = model.unwrap_or_else(|| llm::DEFAULT_MODEL.to_string());
+    let settings = crate::settings::load(&settings_path(&app)?);
+    let backend = llm::resolve_backend(&settings, model.as_deref(), llm::DEFAULT_MODEL);
     let conn = lock(&db)?;
     let content = repo::get_project_content(&conn, &project_id)?;
     let texts: Vec<String> = content
@@ -541,8 +599,16 @@ pub fn enrich_project(
 
     for c in &characters {
         let context = llm::context_for(&c.name, &texts);
-        let description = llm::describe_character(&model, &c.name, &context)?;
-        repo::update_character_description(&conn, &c.id, Some(&description))?;
+        let profile = llm::describe_character(&backend, &c.name, &context)?;
+        repo::update_character_profile(
+            &conn,
+            &c.id,
+            profile.description.as_deref(),
+            profile.biography.as_deref(),
+            &profile.traits,
+            &profile.goals,
+            profile.arc.as_deref(),
+        )?;
     }
 
     repo::list_characters(&conn, &project_id)
@@ -550,16 +616,117 @@ pub fn enrich_project(
 
 /// Corrige gramática, ortografía y puntuación con un LLM local (Ollama).
 #[tauri::command]
-pub fn correct_text(text: String, model: Option<String>) -> Result<String> {
-    let model = model.unwrap_or_else(|| llm::GRAMMAR_MODEL.to_string());
-    llm::correct_grammar(&model, &text)
+pub fn correct_text(app: tauri::AppHandle, text: String, model: Option<String>) -> Result<String> {
+    let settings = crate::settings::load(&settings_path(&app)?);
+    let backend = llm::resolve_backend(&settings, model.as_deref(), llm::GRAMMAR_MODEL);
+    llm::correct_grammar(&backend, &text)
 }
 
 /// Conversa con el LLM local (Ollama) como asistente de escritura.
 #[tauri::command]
-pub fn chat(message: String, model: Option<String>) -> Result<String> {
-    let model = model.unwrap_or_else(|| llm::DEFAULT_MODEL.to_string());
-    llm::chat(&model, &message)
+pub fn chat(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    message: String,
+    model: Option<String>,
+    project_id: Option<String>,
+) -> Result<String> {
+    let settings = crate::settings::load(&settings_path(&app)?);
+    let backend = llm::resolve_backend(&settings, model.as_deref(), llm::DEFAULT_MODEL);
+
+    // Contexto RAG: escenas relevantes de la novela (si embeddings activados).
+    let context = retrieve_context(&app, &db, &settings, project_id.as_deref(), &message)?;
+
+    llm::chat_with_context(&backend, &message, &context)
+}
+
+/// Recupera el contexto de la novela para el chat (RAG). Devuelve vacío si no
+/// aplica (sin proyecto, embeddings desactivados o sin índice).
+fn retrieve_context(
+    app: &tauri::AppHandle,
+    db: &State<'_, Db>,
+    settings: &IaSettings,
+    project_id: Option<&str>,
+    query: &str,
+) -> Result<Vec<String>> {
+    let Some(project_id) = project_id else {
+        return Ok(Vec::new());
+    };
+    if !settings.embeddings {
+        return Ok(Vec::new());
+    }
+
+    // Comprobación rápida: ¿el proyecto tiene índice?
+    {
+        let conn = lock(db)?;
+        if !repo::has_embeddings(&conn, project_id)? {
+            return Ok(Vec::new());
+        }
+    }
+
+    // Reutiliza el modelo cacheado (perfil keep_loaded) en lugar de recargarlo.
+    let cache = app.state::<crate::engines::ModelCache>();
+    let mut embedder_guard = lock_model(&cache.embedder)?;
+    if embedder_guard.is_none() || !settings.keep_loaded {
+        *embedder_guard = crate::engines::create_embedder(settings, &embedder_cache_dir(app)?);
+    }
+
+    let conn = lock(db)?;
+    let result = match embedder_guard.as_mut() {
+        Some(embedder) => rag::retrieve(&conn, project_id, query, rag::TOP_K, embedder),
+        None => Ok(Vec::new()),
+    };
+
+    if !settings.keep_loaded {
+        *embedder_guard = None;
+    }
+    result
+}
+
+/// Indexa las escenas del proyecto para el chat con contexto (RAG), sin ejecutar
+/// el análisis completo. Requiere embeddings activados.
+#[tauri::command]
+pub fn index_project(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    project_id: String,
+) -> Result<usize> {
+    let settings = crate::settings::load(&settings_path(&app)?);
+    if !settings.embeddings {
+        return Err(AppError::Validation(
+            "activa los embeddings antes de indexar".into(),
+        ));
+    }
+
+    let cache = app.state::<crate::engines::ModelCache>();
+    let mut embedder_guard = lock_model(&cache.embedder)?;
+    if embedder_guard.is_none() || !settings.keep_loaded {
+        *embedder_guard = crate::engines::create_embedder(&settings, &embedder_cache_dir(&app)?);
+    }
+
+    let conn = lock(&db)?;
+    let content = repo::get_project_content(&conn, &project_id)?;
+    let scenes: Vec<(String, String)> = content
+        .iter()
+        .flat_map(|(_, scenes)| {
+            scenes
+                .iter()
+                .map(|s| (s.id.clone(), s.content_markdown.clone()))
+        })
+        .filter(|(_, c)| !c.trim().is_empty())
+        .collect();
+
+    let result = match embedder_guard.as_mut() {
+        Some(embedder) => rag::index_project(&conn, &project_id, &scenes, embedder),
+        None => Err(AppError::Internal(
+            "no se pudo cargar el modelo de embeddings".into(),
+        )),
+    };
+
+    if !settings.keep_loaded {
+        *embedder_guard = None;
+    }
+    result
 }
 
 /// Revisa la ortografía de un texto (Hunspell, sin LLM).

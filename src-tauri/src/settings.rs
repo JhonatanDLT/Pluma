@@ -18,6 +18,14 @@ pub struct IaSettings {
     pub embeddings: bool,
     /// Modelo LLM para el enriquecimiento (`None` = desactivado).
     pub llm_model: Option<String>,
+    /// Modelo LLM para tipar relaciones (`None` = desactivado).
+    pub relationship_model: Option<String>,
+    /// Proveedor de IA en la nube (`openai` / `anthropic`).
+    pub cloud_provider: Option<String>,
+    /// API key en la nube. Si está presente, la nube queda **activa por defecto**.
+    pub cloud_api_key: Option<String>,
+    /// Modelo en la nube.
+    pub cloud_model: Option<String>,
     /// Perfil de alto rendimiento: mantener los modelos cargados en memoria entre
     /// análisis. `false` (por defecto) = cargar y liberar en cada uso (mínimo consumo).
     pub keep_loaded: bool,
@@ -29,6 +37,10 @@ impl Default for IaSettings {
             ner_engine: "rules".to_string(),
             embeddings: false,
             llm_model: None,
+            relationship_model: None,
+            cloud_provider: None,
+            cloud_api_key: None,
+            cloud_model: None,
             keep_loaded: false,
         }
     }

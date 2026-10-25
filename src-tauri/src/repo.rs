@@ -576,14 +576,26 @@ pub fn delete_character(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn update_character_description(
+pub fn update_character_profile(
     conn: &Connection,
     id: &str,
     description: Option<&str>,
+    biography: Option<&str>,
+    traits: &[String],
+    goals: &[String],
+    arc: Option<&str>,
 ) -> Result<()> {
     let affected = conn.execute(
-        "UPDATE character SET description = ?1, updated_at = ?2 WHERE id = ?3",
-        params![description, Utc::now().to_rfc3339(), id],
+        "UPDATE character SET description = ?1, biography = ?2, traits_json = ?3, goals_json = ?4, arc = ?5, updated_at = ?6 WHERE id = ?7",
+        params![
+            description,
+            biography,
+            json(traits),
+            json(goals),
+            arc,
+            Utc::now().to_rfc3339(),
+            id
+        ],
     )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("personaje {id}")));
@@ -1045,6 +1057,63 @@ fn parse_json_list(raw: Option<String>) -> Vec<String> {
 
 fn json<T: serde::Serialize>(value: T) -> String {
     serde_json::to_string(&value).unwrap_or_default()
+}
+
+/// Guarda (o actualiza) el embedding semántico de una escena.
+pub fn save_embedding(
+    conn: &Connection,
+    project_id: &str,
+    scene_id: &str,
+    embedding: &[f32],
+) -> Result<()> {
+    let json = serde_json::to_string(embedding)
+        .map_err(|e| AppError::Internal(format!("no se pudo serializar el embedding: {e}")))?;
+    let updated_at = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO scene_embeddings (project_id, scene_id, embedding, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(project_id, scene_id) DO UPDATE SET
+             embedding = excluded.embedding, updated_at = excluded.updated_at",
+        params![project_id, scene_id, json, updated_at],
+    )?;
+    Ok(())
+}
+
+/// Devuelve todos los embeddings de un proyecto: `(scene_id, vector)`.
+pub fn list_embeddings(conn: &Connection, project_id: &str) -> Result<Vec<(String, Vec<f32>)>> {
+    let mut stmt =
+        conn.prepare("SELECT scene_id, embedding FROM scene_embeddings WHERE project_id = ?1")?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (scene_id, json) = row?;
+        let embedding: Vec<f32> = serde_json::from_str(&json)
+            .map_err(|e| AppError::Internal(format!("embedding corrupto: {e}")))?;
+        out.push((scene_id, embedding));
+    }
+    Ok(out)
+}
+
+/// Elimina el índice de un proyecto.
+pub fn clear_embeddings(conn: &Connection, project_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM scene_embeddings WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    Ok(())
+}
+
+/// `true` si el proyecto tiene al menos un embedding indexado.
+pub fn has_embeddings(conn: &Connection, project_id: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM scene_embeddings WHERE project_id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 #[cfg(test)]

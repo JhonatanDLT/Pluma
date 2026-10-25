@@ -24,6 +24,12 @@
   let linkUrl = $state("");
   let linkInput = $state<HTMLInputElement | undefined>(undefined);
 
+  let findOpen = $state(false);
+  let findText = $state("");
+  let replaceText = $state("");
+  let findIndex = $state(-1);
+  let findInput = $state<HTMLInputElement | undefined>(undefined);
+
   let active = $state({
     bold: false,
     italic: false,
@@ -77,6 +83,19 @@
     return () => editor.destroy();
   });
 
+  onMount(() => {
+    function onKeydown(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        findOpen = true;
+        queueMicrotask(() => findInput?.focus());
+      }
+    }
+    document.addEventListener("keydown", onKeydown);
+    return () => document.removeEventListener("keydown", onKeydown);
+  });
+
   function run(command: () => void) {
     command();
     refreshActive();
@@ -106,6 +125,60 @@
       );
     }
     linkOpen = false;
+  }
+
+  function findAll(): { from: number; to: number }[] {
+    if (!findText) return [];
+    const term = findText.toLowerCase();
+    const results: { from: number; to: number }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      const text = node.text ?? "";
+      const lower = text.toLowerCase();
+      let idx = lower.indexOf(term);
+      while (idx !== -1) {
+        results.push({ from: pos + idx, to: pos + idx + findText.length });
+        idx = lower.indexOf(term, idx + term.length);
+      }
+    });
+    return results;
+  }
+
+  function selectMatch(m: { from: number; to: number }) {
+    editor.chain().focus().setTextSelection({ from: m.from, to: m.to }).scrollIntoView().run();
+  }
+
+  function findNext() {
+    const matches = findAll();
+    if (!matches.length) return;
+    findIndex = findIndex < 0 || findIndex >= matches.length - 1 ? 0 : findIndex + 1;
+    selectMatch(matches[findIndex]);
+  }
+
+  function findPrev() {
+    const matches = findAll();
+    if (!matches.length) return;
+    findIndex = findIndex <= 0 ? matches.length - 1 : findIndex - 1;
+    selectMatch(matches[findIndex]);
+  }
+
+  function replace() {
+    if (!findText) return;
+    const { from, to } = editor.state.selection;
+    const selected = editor.state.doc.textBetween(from, to);
+    if (selected.toLowerCase() === findText.toLowerCase()) {
+      editor.chain().focus().insertContentAt({ from, to }, replaceText).run();
+    }
+    findNext();
+  }
+
+  function replaceAll() {
+    if (!findText) return;
+    const matches = findAll();
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const m = matches[i];
+      editor.chain().insertContentAt({ from: m.from, to: m.to }, replaceText).run();
+    }
   }
 </script>
 
@@ -163,9 +236,39 @@
 
     <span class="spacer"></span>
 
+    <button
+      class="btn-icon"
+      class:is-active={findOpen}
+      title="Buscar y reemplazar (Ctrl/Cmd F)"
+      onclick={() => {
+        findOpen = !findOpen;
+        queueMicrotask(() => findInput?.focus());
+      }}
+    >🔍</button>
     <button class="btn-icon" title="Deshacer" onclick={() => run(() => editor.chain().focus().undo().run())}>↶</button>
     <button class="btn-icon" title="Rehacer" onclick={() => run(() => editor.chain().focus().redo().run())}>↷</button>
   </div>
+
+  {#if findOpen}
+    <div class="find-bar">
+      <input
+        class="find-input"
+        bind:this={findInput}
+        bind:value={findText}
+        placeholder="Buscar…"
+        onkeydown={(e) => {
+          if (e.key === "Enter") findNext();
+          if (e.key === "Escape") (findOpen = false);
+        }}
+      />
+      <button class="btn-icon" title="Anterior" onclick={findPrev}>↑</button>
+      <button class="btn-icon" title="Siguiente" onclick={findNext}>↓</button>
+      <input class="find-input" bind:value={replaceText} placeholder="Reemplazar…" />
+      <button class="btn" onclick={replace}>Reemplazar</button>
+      <button class="btn" onclick={replaceAll}>Todo</button>
+      <button class="btn-icon" title="Cerrar" onclick={() => (findOpen = false)}>×</button>
+    </div>
+  {/if}
 
   <div class="surface" bind:this={editorEl}></div>
 </div>
@@ -197,6 +300,26 @@
 
   .spacer {
     flex: 1;
+  }
+
+  .find-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+
+  .find-input {
+    width: 160px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
   }
 
   .link-pop {

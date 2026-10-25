@@ -4214,6 +4214,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "thiserror 2.0.21",
+ "unicode-normalization",
  "ureq 2.12.1",
  "uuid",
  "whatlang",

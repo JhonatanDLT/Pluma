@@ -7,6 +7,8 @@
 use std::collections::{HashMap, HashSet};
 
 use strsim::normalized_levenshtein;
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
 
 use crate::engines::{Embedder, NerEngine};
 
@@ -162,12 +164,18 @@ fn build_report<E: Embedder + ?Sized>(
     let mut characters: Vec<DetectedCharacter> = Vec::new();
     let mut scenes_by_character: HashMap<String, HashSet<usize>> = HashMap::new();
     for cluster in clusters {
+        // Nombre canónico: el más completo (más tokens significativos) y, a
+        // igualdad, el más frecuente. Así «Klein Moretti» gana a «Klein».
         let mut sorted = cluster.clone();
         sorted.sort_by(|a, b| {
-            mention_counts
-                .get(b)
-                .unwrap_or(&0)
-                .cmp(mention_counts.get(a).unwrap_or(&0))
+            let ta = significant_tokens(a).len();
+            let tb = significant_tokens(b).len();
+            tb.cmp(&ta).then_with(|| {
+                mention_counts
+                    .get(b)
+                    .unwrap_or(&0)
+                    .cmp(mention_counts.get(a).unwrap_or(&0))
+            })
         });
         let canonical = sorted[0].clone();
         let aliases: Vec<String> = sorted[1..].to_vec();
@@ -216,49 +224,22 @@ fn build_report<E: Embedder + ?Sized>(
                 continue;
             }
 
-            let shared_texts: Vec<&str> = shared
-                .iter()
-                .filter_map(|&idx| texts.get(idx).map(|t| t.as_str()))
-                .collect();
-
-            // Nombres completos (canónico + alias) para la co-localización.
-            let names_a = std::iter::once(a.name.clone())
-                .chain(a.aliases.iter().cloned())
-                .collect::<Vec<_>>();
-            let names_b = std::iter::once(b.name.clone())
-                .chain(b.aliases.iter().cloned())
-                .collect::<Vec<_>>();
-            let kind = infer_relationship_type(&names_a, &names_b, &shared_texts);
+            // El tipo de relación (familia, romance, …) es lingüístico y requiere
+            // un modelo multilingüe. Las reglas agnósticas solo detectan
+            // co-ocurrencia: se emite la relación si comparten 2+ escenas.
+            if shared.len() < 2 {
+                continue;
+            }
 
             relationships.push(DetectedRelationship {
                 a: a.name.clone(),
                 b: b.name.clone(),
                 cooccurrences: shared.len(),
-                kind,
+                kind: None,
             });
         }
     }
     relationships.sort_by(|a, b| b.cooccurrences.cmp(&a.cooccurrences));
-
-    // Marca como antagonista al personaje con relación de rivalidad con el protagonista.
-    if let Some(protagonist) = characters.first().map(|c| c.name.clone()) {
-        for rel in &relationships {
-            if rel.kind.as_deref() == Some("rivalidad") {
-                let other = if rel.a == protagonist {
-                    &rel.b
-                } else if rel.b == protagonist {
-                    &rel.a
-                } else {
-                    continue;
-                };
-                if let Some(c) = characters.iter_mut().find(|c| &c.name == other) {
-                    if c.role == "secundario" {
-                        c.role = "antagonista".to_string();
-                    }
-                }
-            }
-        }
-    }
 
     (characters, relationships)
 }
@@ -310,127 +291,53 @@ fn build_entities(
 }
 
 /// Extrae candidatos a nombre propio (palabra en mayúscula, no a inicio de frase).
+/// Extrae candidatos a nombre propio de forma **agnóstica al idioma**:
+/// secuencias de palabras con inicial mayúscula (title-case) en mitad de frase.
+/// Sin diccionarios: distinguir persona de lugar u organización corresponde a
+/// los modelos multilingües (GLiNER2).
 fn extract_candidates(text: &str) -> Vec<String> {
-    const STOPWORDS: &[&str] = &[
-        "el",
-        "la",
-        "los",
-        "las",
-        "un",
-        "una",
-        "unos",
-        "unas",
-        "de",
-        "del",
-        "y",
-        "e",
-        "o",
-        "u",
-        "a",
-        "al",
-        "en",
-        "por",
-        "para",
-        "con",
-        "sin",
-        "sobre",
-        "entre",
-        "hasta",
-        "desde",
-        "que",
-        "se",
-        "su",
-        "sus",
-        "mi",
-        "mis",
-        "tu",
-        "tus",
-        "le",
-        "les",
-        "lo",
-        "es",
-        "son",
-        "fue",
-        "era",
-        "no",
-        "si",
-        "ya",
-        "muy",
-        "más",
-        "mas",
-        "pero",
-        "como",
-        "cuando",
-        "donde",
-        "todo",
-        "todos",
-        "este",
-        "esta",
-        "ese",
-        "esa",
-        "aquel",
-        "usted",
-        "señor",
-        "señora",
-        "don",
-        "doña",
-        "ni",
-        "tan",
-        "ha",
-        "han",
-        "he",
-        "hemos",
-        "había",
-        "está",
-        "estaba",
-        "ser",
-        "estar",
-        "me",
-        "te",
-        "nos",
-        "yo",
-        "tú",
-        "él",
-        "ella",
-        "ellos",
-        "ellas",
-        "señorita",
-        "doctor",
-        "doctora",
-        "capítulo",
-        "capitulo",
-        "escena",
-        "parte",
-        "prólogo",
-        "prologo",
-        "epílogo",
-        "epilogo",
-    ];
-
     let mut result = Vec::new();
+    let mut current: Vec<String> = Vec::new();
     let mut sentence_start = true;
 
     for raw in text.split_whitespace() {
-        let word = raw.trim_matches(|c: char| !c.is_alphabetic());
-        // Los guiones de diálogo (`—`, `–`) no marcan fin de frase: permiten
-        // detectar al hablante ("—dijo Ana—").
+        let word = raw.trim_matches(|c: char| !c.is_alphanumeric()).to_string();
         let ends_sentence = raw
             .chars()
             .last()
             .map(|c| matches!(c, '.' | '!' | '?' | ':' | ';'))
             .unwrap_or(false);
+        // Puntuación que cierra un nombre dentro de una frase. La coma separa
+        // «Ana, Pedro» pero no rompe «Zhou Mingrui, que…» porque el token
+        // completo es «Mingrui,».
+        let closes = raw
+            .chars()
+            .last()
+            .map(|c| matches!(c, ',' | '.' | '!' | '?' | ':' | ';'))
+            .unwrap_or(false);
 
-        if word.chars().count() >= 2 {
-            let first = word.chars().next().unwrap();
-            if first.is_uppercase() && !sentence_start {
-                let lower = word.to_lowercase();
-                if !STOPWORDS.contains(&lower.as_str()) {
-                    result.push(word.to_string());
-                }
+        // Token de nombre: inicial mayúscula, no todo en mayúsculas (descarta
+        // acrónimos) y no al inicio de frase (evita verbos y conectores).
+        let is_name_token = !sentence_start
+            && word.chars().count() >= 2
+            && word.chars().next().is_some_and(|c| c.is_uppercase())
+            && !word.chars().all(|c| c.is_uppercase());
+
+        if is_name_token {
+            current.push(word);
+        }
+        if !is_name_token || closes {
+            if !current.is_empty() {
+                result.push(current.join(" "));
+                current.clear();
             }
         }
 
         sentence_start = ends_sentence;
+    }
+
+    if !current.is_empty() {
+        result.push(current.join(" "));
     }
 
     result
@@ -464,59 +371,22 @@ fn cluster_aliases(names: &[String]) -> Vec<Vec<String>> {
     clusters
 }
 
-/// Títulos, tratamientos y artículos que no identifican por sí solos a un
-/// personaje («Lord Sterling» → «Sterling»). Se omiten al comparar nombres.
-const HONORIFICS: &[&str] = &[
-    "el",
-    "la",
-    "los",
-    "las",
-    "un",
-    "una",
-    "unos",
-    "unas",
-    "de",
-    "del",
-    "y",
-    "e",
-    "don",
-    "doña",
-    "señor",
-    "señora",
-    "señorita",
-    "lord",
-    "lady",
-    "sir",
-    "doctor",
-    "doctora",
-    "conde",
-    "condesa",
-    "duque",
-    "duquesa",
-    "marqués",
-    "marquesa",
-    "rey",
-    "reina",
-    "príncipe",
-    "princesa",
-    "capitán",
-    "capitana",
-    "coronel",
-    "sargento",
-    "profesor",
-    "profesora",
-    "monsieur",
-    "madame",
-    "santo",
-    "santa",
-    "san",
-];
+/// Normaliza una cadena para compararla: descompone en NFD, elimina diacríticos
+/// (tildes) y convierte a minúsculas. Así «Lucía» == «Lucia» y «Pérez» == «Perez».
+fn fold(s: &str) -> String {
+    s.nfkd()
+        .filter(|c| !is_combining_mark(*c))
+        .collect::<String>()
+        .to_lowercase()
+}
 
-/// Tokens significativos de un nombre: sin títulos/tratamientos, en minúsculas.
+/// Tokens significativos de un nombre: normalizados y con longitud mínima.
+/// Agnóstico al idioma: la dedup por subsecuencia y los modelos se encargan de
+/// los títulos («Lord Sterling» vs «Sterling»).
 fn significant_tokens(name: &str) -> Vec<String> {
     name.split_whitespace()
-        .map(|t| t.trim_matches(|c: char| !c.is_alphabetic()).to_lowercase())
-        .filter(|t| t.chars().count() >= 2 && !HONORIFICS.contains(&t.as_str()))
+        .map(|t| fold(t.trim_matches(|c: char| !c.is_alphabetic())))
+        .filter(|t| t.chars().count() >= 2)
         .collect()
 }
 
@@ -530,13 +400,9 @@ fn is_contiguous_subsequence(needle: &[String], haystack: &[String]) -> bool {
 
 /// Decide si dos formas superficiales se refieren al mismo personaje.
 fn is_same_character(a: &str, b: &str) -> bool {
-    let na = a.to_lowercase();
-    let nb = b.to_lowercase();
-    if na == nb {
-        return true;
-    }
-    // Variaciones tipográficas (acentos, letras intercambiadas).
-    if normalized_levenshtein(&na, &nb) > 0.8 {
+    let fa = fold(a);
+    let fb = fold(b);
+    if fa == fb {
         return true;
     }
 
@@ -550,7 +416,18 @@ fn is_same_character(a: &str, b: &str) -> bool {
         return true;
     }
     // Comparten apellido (último token) y uno de los dos es monopalabra.
-    ta.last() == tb.last() && (ta.len() == 1 || tb.len() == 1)
+    if ta.last() == tb.last() && (ta.len() == 1 || tb.len() == 1) {
+        return true;
+    }
+    // Tolerancia a erratas solo para nombres largos (≥ 6 caracteres): evita
+    // fusionar pares cortos distintos («Ana»/«Ada») o variantes de género
+    // («Marina»/«Marino»).
+    if fa.chars().count() >= 6 && fb.chars().count() >= 6 && normalized_levenshtein(&fa, &fb) > 0.85
+    {
+        return true;
+    }
+
+    false
 }
 
 /// Fusiona grupos cuyas descripciones son semánticamente similares (embeddings).
@@ -602,8 +479,8 @@ fn merge_by_semantics<E: Embedder + ?Sized>(
 fn extract_description(names: &[String], texts: &[String]) -> String {
     for text in texts {
         for sentence in split_sentences(text) {
-            let lower = sentence.to_lowercase();
-            if names.iter().any(|n| lower.contains(&n.to_lowercase())) {
+            let folded = fold(sentence);
+            if names.iter().any(|n| folded.contains(&fold(n))) {
                 let s = sentence.trim();
                 if !s.is_empty() {
                     return s.chars().take(220).collect();
@@ -621,114 +498,8 @@ fn split_sentences(text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Infiere el tipo de relación a partir de marcadores lingüísticos.
-///
-/// A diferencia de la versión anterior, solo considera las **oraciones donde
-/// ambos personajes aparecen**, y elige el tipo con más evidencia en lugar de
-/// devolver «familia» ante el primer marcador (que aparecía con mucha frecuencia
-/// en textos largos y dominaba el resultado).
-fn infer_relationship_type(
-    names_a: &[String],
-    names_b: &[String],
-    shared_texts: &[&str],
-) -> Option<String> {
-    const FAMILY: &[&str] = &[
-        "hermano",
-        "hermana",
-        "padre",
-        "madre",
-        "hijo",
-        "hija",
-        "tío",
-        "tía",
-        "primo",
-        "prima",
-        "abuelo",
-        "abuela",
-        "sobrino",
-        "sobrina",
-        "madrastra",
-        "padrastro",
-        "esposo",
-        "esposa",
-        "marido",
-        "mujer",
-        "cuñado",
-        "cuñada",
-    ];
-    const ROMANCE: &[&str] = &[
-        "amaba",
-        "amor",
-        "enamorado",
-        "enamorada",
-        "beso",
-        "besó",
-        "besaba",
-        "pareja",
-        "novio",
-        "novia",
-        "amantes",
-        "acarici",
-        "abraz",
-    ];
-    const RIVALRY: &[&str] = &[
-        "odiaba",
-        "odio",
-        "enemigo",
-        "enemiga",
-        "rival",
-        "enfrentó",
-        "enfrenta",
-        "traicionó",
-        "traición",
-        "venganza",
-        "desprecio",
-        "duelo",
-        "desafió",
-    ];
-    const FRIENDSHIP: &[&str] = &[
-        "amigo",
-        "amiga",
-        "amistad",
-        "compañero",
-        "compañera",
-        "camarada",
-        "aliado",
-        "aliada",
-    ];
-
-    let la: Vec<String> = names_a.iter().map(|n| n.to_lowercase()).collect();
-    let lb: Vec<String> = names_b.iter().map(|n| n.to_lowercase()).collect();
-
-    let mut scores: HashMap<&'static str, usize> = HashMap::new();
-    for text in shared_texts {
-        for sentence in split_sentences(text) {
-            let lower = sentence.to_lowercase();
-            let has_a = la.iter().any(|n| lower.contains(n));
-            let has_b = lb.iter().any(|n| lower.contains(n));
-            if !has_a || !has_b {
-                continue;
-            }
-            if FAMILY.iter().any(|&m| lower.contains(m)) {
-                *scores.entry("familia").or_insert(0) += 1;
-            }
-            if ROMANCE.iter().any(|&m| lower.contains(m)) {
-                *scores.entry("romance").or_insert(0) += 1;
-            }
-            if RIVALRY.iter().any(|&m| lower.contains(m)) {
-                *scores.entry("rivalidad").or_insert(0) += 1;
-            }
-            if FRIENDSHIP.iter().any(|&m| lower.contains(m)) {
-                *scores.entry("amistad").or_insert(0) += 1;
-            }
-        }
-    }
-
-    scores
-        .into_iter()
-        .max_by_key(|(_, count)| *count)
-        .map(|(kind, _)| kind.to_string())
-}
+// El tipado de relaciones (familia, romance, …) es lingüístico y se delega a
+// un modelo multilingüe (SLM); no hay heurística agnóstica fiable por diccionario.
 
 #[cfg(test)]
 mod tests {
@@ -781,15 +552,6 @@ mod tests {
     }
 
     #[test]
-    fn relationships_only_when_both_names_co_occur() {
-        // "hermano" aparece, pero no en la misma oración que ambos personajes.
-        let a = vec!["Ana".to_string()];
-        let b = vec!["Pedro".to_string()];
-        let shared = vec!["Ana estaba sola. Pedro tenía un hermano."];
-        assert_eq!(infer_relationship_type(&a, &b, &shared), None);
-    }
-
-    #[test]
     fn analysis_detects_relationships() {
         let texts = vec![
             "La casa de Ana estaba cerca de Pedro.".to_string(),
@@ -803,24 +565,6 @@ mod tests {
                 .relationships
                 .iter()
                 .any(|r| { (r.a == "Ana" && r.b == "Pedro") || (r.a == "Pedro" && r.b == "Ana") })
-        );
-    }
-
-    #[test]
-    fn infers_relationship_type() {
-        let a = vec!["Ana".to_string()];
-        let b = vec!["Pedro".to_string()];
-
-        let shared = vec!["Ana era la hermana de Pedro."];
-        assert_eq!(
-            infer_relationship_type(&a, &b, &shared),
-            Some("familia".to_string())
-        );
-
-        let shared = vec!["Pedro amaba a Ana en secreto."];
-        assert_eq!(
-            infer_relationship_type(&a, &b, &shared),
-            Some("romance".to_string())
         );
     }
 
@@ -839,5 +583,66 @@ mod tests {
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].name, "Roma");
         assert_eq!(entities[0].entity_type, "location");
+    }
+
+    #[test]
+    fn merges_accent_and_case_variants() {
+        assert!(is_same_character("Lucía", "Lucia"));
+        assert!(is_same_character("Pérez", "Perez"));
+        assert!(is_same_character("Ana María", "Ana Maria"));
+    }
+
+    #[test]
+    fn does_not_merge_distinct_or_gendered_names() {
+        assert!(!is_same_character("Ana", "Ada"));
+        assert!(!is_same_character("Marina", "Marino"));
+    }
+
+    #[test]
+    fn clusters_accent_variants() {
+        let names = vec![
+            "Lucía".to_string(),
+            "Lucia".to_string(),
+            "Pedro".to_string(),
+        ];
+        let clusters = cluster_aliases(&names);
+        assert_eq!(clusters.len(), 2);
+    }
+
+    #[test]
+    fn skips_noisy_single_scene_relationship() {
+        let texts = vec![
+            "La casa de Ana y Pedro era antigua.".to_string(),
+            "El amigo de Ana llegó tarde.".to_string(),
+            "Su hermano llamó a Pedro por la mañana.".to_string(),
+        ];
+        let result = analyze::<crate::engines::FastEmbedder>(&texts, None);
+        assert!(result.characters.iter().any(|c| c.name == "Ana"));
+        assert!(result.characters.iter().any(|c| c.name == "Pedro"));
+        assert!(
+            !result
+                .relationships
+                .iter()
+                .any(|r| (r.a == "Ana" && r.b == "Pedro") || (r.a == "Pedro" && r.b == "Ana"))
+        );
+    }
+
+    #[test]
+    fn chunks_multword_names_agnostically() {
+        // Verifica el chunking agnóstico: «Zhou Mingrui» se detecta como una
+        // sola entidad (no fragmentado en «Zhou» + «Mingrui»). La limpieza fina
+        // (distinguir persona de lugar, «Klein Moretti» completo) la aporta
+        // GLiNER2, no las reglas.
+        let text = include_str!("../../LOTM01.txt");
+        let texts = vec![text.to_string()];
+        let result = analyze::<crate::engines::FastEmbedder>(&texts, None);
+
+        let names: Vec<&str> = result.characters.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            names.contains(&"Zhou Mingrui"),
+            "faltó Zhou Mingrui: {names:?}"
+        );
+        assert!(!names.contains(&"Zhou"), "nombre fragmentado: {names:?}");
+        assert!(!names.contains(&"Mingrui"), "nombre fragmentado: {names:?}");
     }
 }

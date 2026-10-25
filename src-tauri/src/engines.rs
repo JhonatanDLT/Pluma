@@ -186,3 +186,62 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
     dot / (na.sqrt() * nb.sqrt())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Compara reglas agnósticas vs GLiNER2 sobre el primer capítulo de LotM.
+    /// Requiere ONNX Runtime + el modelo GLiNER2 ya descargados (ver `ia_install`).
+    #[test]
+    #[ignore = "requiere ONNX Runtime + modelo GLiNER2 (~1 GB)"]
+    fn compare_rules_vs_gliner_on_lotm() {
+        let text = include_str!("../../LOTM01.txt");
+        let texts = vec![text.to_string()];
+
+        // --- Antes: reglas agnósticas (sin modelos) ---
+        let rules = crate::nlp::analyze::<FastEmbedder>(&texts, None);
+        println!("=== REGLAS (agnósticas) — personajes ===");
+        for c in &rules.characters {
+            println!("  - {:>24}  x{}", c.name, c.mention_count);
+        }
+
+        // --- Después: GLiNER2 (multilingüe, zero-shot) ---
+        let home = std::env::var("HOME").unwrap_or_default();
+        let data_dir = PathBuf::from(home).join("Library/Application Support/com.pluma.app");
+        crate::runtime::prepare(&data_dir);
+        assert!(
+            crate::runtime::is_available(&data_dir),
+            "ONNX Runtime no disponible; ejecuta antes ia_install onnxruntime"
+        );
+
+        let cache_dir = std::env::temp_dir().join(format!("pluma-gliner-{}", std::process::id()));
+        let mut engine = Gliner2Engine::try_new(&cache_dir).expect("cargar GLiNER2");
+        let mentions = engine.extract(text).expect("extraer entidades");
+
+        let mut people = Vec::new();
+        let mut locations = Vec::new();
+        let mut orgs = Vec::new();
+        for m in &mentions {
+            match m.label.as_str() {
+                "person" => people.push(m.text.as_str()),
+                "location" => locations.push(m.text.as_str()),
+                "organization" => orgs.push(m.text.as_str()),
+                _ => {}
+            }
+        }
+        println!("=== GLiNER2 — PERSONAS ===");
+        for p in &people {
+            println!("  {p}");
+        }
+        println!("=== GLiNER2 — LUGARES ===");
+        for l in &locations {
+            println!("  {l}");
+        }
+        println!("=== GLiNER2 — ORGANIZACIONES ===");
+        for o in &orgs {
+            println!("  {o}");
+        }
+    }
+}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ChangeEntry, Character, Entity, IaStatus, Relationship } from "$lib/types";
+  import type { ChangeEntry, Character, Entity, Relationship } from "$lib/types";
 
   let {
     characters,
@@ -8,18 +8,11 @@
     analyzing,
     enriching,
     progress,
-    iaStatus,
     changeLog,
     onanalyze,
     onenrich,
     ondeletecharacter,
     ondeleteentity,
-    onupdateembeddings,
-    oninstallembeddings,
-    onupdatenerengine,
-    oninstallgliner,
-    oninstallonnxruntime,
-    onupdatekeeploaded,
     onclose,
   }: {
     characters: Character[];
@@ -28,25 +21,18 @@
     analyzing: boolean;
     enriching: boolean;
     progress: { done: number; total: number; phase: string } | null;
-    iaStatus: IaStatus | null;
     changeLog: ChangeEntry[];
     onanalyze: () => void;
     onenrich: () => void;
     ondeletecharacter: (id: string) => void;
     ondeleteentity: (id: string) => void;
-    onupdateembeddings: (enabled: boolean) => void;
-    oninstallembeddings: () => void;
-    onupdatenerengine: (engine: string) => void;
-    oninstallgliner: () => void;
-    oninstallonnxruntime: () => void;
-    onupdatekeeploaded: (enabled: boolean) => void;
     onclose: () => void;
   } = $props();
 
   type Tab = "characters" | "relationships" | "factions" | "locations" | "log";
   let tab = $state<Tab>("characters");
   let selectedCharacterId = $state<string | null>(null);
-  let showSettings = $state(false);
+  let search = $state("");
 
   const locations = $derived(entities.filter((e) => e.entity_type === "location"));
   const factions = $derived(entities.filter((e) => e.entity_type === "faction"));
@@ -56,6 +42,47 @@
   const entityList = $derived(
     tab === "factions" ? factions : tab === "locations" ? locations : [],
   );
+
+  const filteredCharacters = $derived.by(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return characters;
+    return characters.filter((c) =>
+      [
+        c.name,
+        c.aliases.join(" "),
+        c.description ?? "",
+        c.biography ?? "",
+        c.traits.join(" "),
+        c.goals.join(" "),
+        c.arc ?? "",
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  });
+
+  const filteredEntities = $derived.by(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return entityList;
+    return entityList.filter((e) =>
+      [e.name, e.aliases.join(" "), e.description ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  });
+
+  const filteredRelationships = $derived.by(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return relationships;
+    return relationships.filter((r) =>
+      [nameFor(r.character_a_id), nameFor(r.character_b_id), r.kind ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  });
 
   const progressPct = $derived(
     progress && progress.total > 0
@@ -70,6 +97,10 @@
   function kindLabel(kind: string | null): string | null {
     if (!kind) return null;
     return kind.charAt(0).toUpperCase() + kind.slice(1);
+  }
+
+  function relationshipsFor(id: string): Relationship[] {
+    return relationships.filter((r) => r.character_a_id === id || r.character_b_id === id);
   }
 </script>
 
@@ -94,15 +125,17 @@
         >
           {enriching ? "Enriqueciendo…" : "Enriquecer"}
         </button>
-        <button
-          class="btn-icon"
-          class:is-active={showSettings}
-          title="Configuración de IA"
-          onclick={() => (showSettings = !showSettings)}
-        >⚙</button>
         <button class="btn-icon" title="Cerrar" onclick={onclose}>×</button>
       </div>
     </header>
+
+    <div class="wb-search">
+      <input
+        class="input"
+        bind:value={search}
+        placeholder="Buscar en el mundo (personajes, lugares, facciones)…"
+      />
+    </div>
 
     {#if analyzing}
       <div class="wb-progress">
@@ -116,65 +149,6 @@
               : `Escenas ${progress.done}/${progress.total}`
             : "Analizando…"}
         </span>
-      </div>
-    {/if}
-
-    {#if showSettings}
-      <div class="wb-settings">
-        {#if iaStatus && !iaStatus.onnxruntime_available}
-          <div class="runtime-row">
-            <p class="ia-note">
-              Los motores de IA locales (GLiNER2 y embeddings) requieren el runtime
-              de ONNX Runtime. Se instala una sola vez y con tu permiso.
-            </p>
-            <button class="btn" onclick={oninstallonnxruntime}>
-              Instalar runtime ONNX
-            </button>
-          </div>
-        {/if}
-
-        {#if iaStatus}
-          <label class="field">
-            <span>Motor NER</span>
-            <select
-              value={iaStatus.settings.ner_engine}
-              onchange={(e) => onupdatenerengine(e.currentTarget.value)}
-            >
-              <option value="rules">Reglas (ligero)</option>
-              <option value="gliner">GLiNER2 (local)</option>
-            </select>
-          </label>
-
-          {#if iaStatus.settings.ner_engine === "gliner" && !iaStatus.gliner_cached}
-            <button class="btn" onclick={oninstallgliner}>Descargar GLiNER2</button>
-          {/if}
-
-          <label class="toggle">
-            <input
-              type="checkbox"
-              checked={iaStatus.settings.embeddings}
-              onchange={(e) => onupdateembeddings(e.currentTarget.checked)}
-            />
-            <span>Embeddings (semántica)</span>
-          </label>
-
-          {#if iaStatus.settings.embeddings && !iaStatus.embeddings_cached}
-            <button class="btn" onclick={oninstallembeddings}>Descargar modelo</button>
-          {/if}
-
-          <label class="toggle">
-            <input
-              type="checkbox"
-              checked={iaStatus.settings.keep_loaded}
-              onchange={(e) => onupdatekeeploaded(e.currentTarget.checked)}
-            />
-            <span>Mantener modelos en memoria (alto rendimiento)</span>
-          </label>
-
-          {#if !iaStatus.ollama_available}
-            <p class="ia-note">Ollama no detectado: "Enriquecer" no estará disponible.</p>
-          {/if}
-        {/if}
       </div>
     {/if}
 
@@ -206,7 +180,7 @@
         {:else}
           <div class="wb-split">
             <ul class="wb-list">
-              {#each characters as c (c.id)}
+              {#each filteredCharacters as c (c.id)}
                 <li>
                   <button
                     class="wb-item"
@@ -256,6 +230,34 @@
                     <div><dt>Arco</dt><dd>{selectedCharacter.arc}</dd></div>
                   {/if}
                 </dl>
+                <div class="wb-profile-rel">
+                  <h4>Relaciones</h4>
+                  {#if relationshipsFor(selectedCharacter.id).length === 0}
+                    <p class="wb-empty">Sin relaciones detectadas.</p>
+                  {:else}
+                    <ul class="wb-rel-links">
+                      {#each relationshipsFor(selectedCharacter.id) as r (r.id)}
+                        <li>
+                          <button
+                            class="wb-link"
+                            onclick={() =>
+                              (selectedCharacterId =
+                                r.character_a_id === selectedCharacter.id
+                                  ? r.character_b_id
+                                  : r.character_a_id)}
+                          >
+                            {nameFor(
+                              r.character_a_id === selectedCharacter.id
+                                ? r.character_b_id
+                                : r.character_a_id,
+                            )}
+                          </button>
+                          {#if r.kind}<span class="wb-kind">{kindLabel(r.kind)}</span>{/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </div>
               {:else}
                 <p class="wb-empty">Selecciona un personaje para ver su ficha técnica.</p>
               {/if}
@@ -267,7 +269,7 @@
           <p class="wb-empty">Aún no hay relaciones detectadas.</p>
         {:else}
           <ul class="wb-rel">
-            {#each relationships as r (r.id)}
+            {#each filteredRelationships as r (r.id)}
               <li>
                 <span class="wb-rel-pair">
                   {nameFor(r.character_a_id)} ↔ {nameFor(r.character_b_id)}
@@ -286,7 +288,7 @@
           </p>
         {:else}
           <ul class="wb-list">
-            {#each entityList as e (e.id)}
+            {#each filteredEntities as e (e.id)}
               <li>
                 <div class="wb-item">
                   <span class="wb-item-name">{e.name}</span>
@@ -410,54 +412,6 @@
     font-size: 11px;
     color: var(--text-muted);
     white-space: nowrap;
-  }
-
-  .wb-settings {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 14px;
-    padding: 10px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-sidebar);
-  }
-
-  .runtime-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-basis: 100%;
-  }
-
-  .ia-note {
-    margin: 0;
-    font-size: 11px;
-    color: var(--text-faint);
-  }
-
-  .field {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .field select {
-    font: inherit;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
-    color: var(--text);
-  }
-
-  .toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    cursor: pointer;
   }
 
   .wb-tabs {
@@ -687,5 +641,57 @@
   .wb-log-summary {
     font-size: 13px;
     color: var(--text);
+  }
+
+  .wb-search {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .wb-profile-rel {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .wb-profile-rel h4 {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+
+  .wb-rel-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .wb-rel-links li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .wb-link {
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    padding: 0;
+    text-align: left;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .wb-link:hover {
+    color: var(--accent-hover);
   }
 </style>

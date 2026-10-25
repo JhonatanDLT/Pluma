@@ -107,6 +107,21 @@ fragmento; sin Ollama, la app sigue funcionando con la Capa 1.
 
 ---
 
+## Fase 6 — IA en nube, RAG y wiki ✅ (implementada)
+
+- [x] **IA en la nube (opt-in)**: OpenAI y Anthropic, activa por defecto si hay API key; backend unificado (`llm::Backend`) que sustituye a Ollama para chat, corrección, enriquecimiento y tipado de relaciones.
+- [x] **Chat con contexto (RAG)**: indexado de escenas con `fastembed`, recuperación por similitud coseno y contexto inyectado al chat (Ollama o nube).
+- [x] **Enriquecimiento completo de fichas**: descripción, biografía, rasgos, objetivos y arco (salida JSON estructurada).
+- [x] **World Building tipo wiki**: búsqueda integrada y navegación entre fichas (relaciones clicables).
+- [x] **Análisis automático en segundo plano** al marcar capítulo como «Revisado»/«Final».
+- [x] **Buscar y reemplazar** en el editor (`Ctrl/Cmd+F`).
+- [x] **Paletas de color** (claro, oscuro, sepia, papel) configurables.
+
+**Criterio de salida**: con una API key o Ollama, enriquecer una ficha completa;
+chatear con contexto RAG; buscar y navegar el mundo.
+
+---
+
 ## Resumen de prioridades por fase
 
 ```mermaid

@@ -8,6 +8,7 @@ mod llm;
 mod models;
 mod nlp;
 mod parser;
+mod rag;
 mod repo;
 mod runtime;
 mod settings;
@@ -79,6 +80,7 @@ pub fn run() {
             commands::enrich_project,
             commands::correct_text,
             commands::chat,
+            commands::index_project,
             commands::spell_check,
             commands::spell_install,
             commands::spell_languages,

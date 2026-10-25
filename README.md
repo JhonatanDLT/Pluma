@@ -23,14 +23,14 @@
 - **Navegación**: conmutador rápido (`Ctrl/Cmd+K`) para saltar a cualquier capítulo/escena, y atajos de teclado entre capítulos y escenas.
 - **Progreso de escritura** por capítulo con **objetivo de palabras configurable** por proyecto.
 - **Interfaz reorganizada**: selección de proyecto como vista principal, paneles de capítulos/escenas colapsables y redimensionables, y un **panel derecho ligero** con **asistente (minibot)**, metadatos, versiones y ajustes.
-- **World Building**: vista dedicada (botón «Mundo») con personajes (ficha técnica), relaciones, facciones, lugares y **registro de cambios** del análisis.
-- **Asistente local (minibot)**: conversa con el LLM (Ollama) desde el panel derecho.
+- **World Building tipo wiki**: vista dedicada (botón «Mundo») con personajes (ficha técnica), relaciones, facciones, lugares y registro de cambios, más **búsqueda integrada** y **navegación entre fichas** (clic en una relación salta al personaje).
+- **Asistente (minibot)**: conversa con el LLM desde el panel derecho, con **contexto RAG** (recupera las escenas relevantes de tu novela para no alucinar).
 - **Niveles configurables**: renombra las etiquetas de la jerarquía (p. ej. «Volúmenes»/«Capítulos») y oculta automáticamente el segundo nivel cuando el manuscrito no usa subdivisión de escenas.
 - **Exportación**: Markdown, TXT, HTML, Word (`.docx`), PDF y EPUB.
-- **IA local modular (opt-in)**: personajes y relaciones por reglas (siempre), más **NER con GLiNER2** y **embeddings semánticos** opcionales, y **LLM (Ollama)** para enriquecer descripciones.
-- **Análisis mejorado**: deduplicación de personajes (títulos y apodos), tipado de relaciones por co-localización de oraciones, y un único motor NER a la vez (menos ruido y más rápido).
+- **IA local modular (opt-in)**: personajes y relaciones por reglas (siempre), más **NER con GLiNER2** y **embeddings semánticos** opcionales, y **LLM (Ollama)** para enriquecer.
+- **Análisis mejorado**: deduplicación de personajes **insensible a tildes/mayúsculas** (títulos y apodos), tipado de relaciones por co-localización de oraciones, **filtrado de relaciones ruidosas** (una sola escena sin señal lingüística) y un único motor NER a la vez (menos ruido y más rápido).
 - **Entidades** (lugares y facciones) detectadas con GLiNER2, con pestañas dedicadas.
-- **Hoja de personaje** (ficha detallada) al seleccionar un personaje.
+- **Hoja de personaje** (ficha detallada): descripción, biografía, rasgos, objetivos y arco, **autogenerada** por el enriquecimiento.
 - **Corrector gramatical** de escenas con LLM local (Ollama, modelo ligero dedicado `qwen2.5:0.5b`).
 - **Ortografía multilingüe**: corrector Hunspell con detección automática de idioma (`whatlang`) y diccionarios descargables bajo demanda, sin LLM.
 - **Perfil de rendimiento**: opción de mantener los modelos cargados en memoria.
@@ -38,20 +38,26 @@
 - **Versionado** (snapshots) con detección de cambios por huella SHA-256: guardar, restaurar y eliminar versiones del manuscrito.
 - **Rendimiento**: análisis incremental (no reanaliza si el texto no cambió) e importación con sentencias preparadas.
 - **Estilo** minimalista y elegante (paleta cálida, tipografía serif, modo oscuro).
+- **IA en la nube (opcional)**: OpenAI y Anthropic, **activa por defecto** si configuras una API key; sustituye a Ollama para chat, corrección, enriquecimiento y tipado de relaciones.
+- **Chat con contexto (RAG)**: indexa las escenas con embeddings y las inyecta como contexto en el chat.
+- **Enriquecimiento completo de fichas**: genera descripción, biografía, rasgos, objetivos y arco (salida JSON estructurada).
+- **Análisis automático en segundo plano** al marcar un capítulo como «Revisado» o «Final».
+- **Buscar y reemplazar** en el editor (`Ctrl/Cmd+F`).
 
 ### ⚠️ Opcional (opt-in, descarga bajo demanda)
 
 - **NER con GLiNER2** (`gliner2-rs`): modelo local multilingüe (~1 GB) para detectar personajes con mayor precisión.
 - **Embeddings semánticos** (`fastembed`): descarga ~120 MB la primera vez; mejora la resolución de alias.
 - **Runtime ONNX Runtime**: se descarga e instala automáticamente (con permiso) la primera vez que se activa un motor de IA local.
-- **Enriquecimiento con LLM (Ollama)**: genera descripciones de personaje con un LLM local.
+- **Enriquecimiento con LLM (Ollama o nube)**: genera la ficha completa de personaje (descripción, biografía, rasgos, objetivos y arco).
 - **Diccionarios de ortografía** (Hunspell): se descargan bajo demanda por idioma (pocos MB cada uno).
 - **OCR de imágenes y PDFs escaneados**: requiere Tesseract (+ Poppler para PDFs escaneados).
 
 ### 🔜 Pendiente (mejoras)
 
 - TTS neuronal (Piper) — ver `docs/04`.
-- Pulido: atajos de teclado, modo foco, edición de fichas de personaje.
+- Búsqueda server-side FTS5 (hoy client-side) — ver deuda técnica en `docs/08`.
+- Modo foco y atajos de teclado configurables.
 
 ---
 

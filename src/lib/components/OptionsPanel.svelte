@@ -2,8 +2,11 @@
   import AssistantPanel from "$lib/components/AssistantPanel.svelte";
   import MetadataPanel from "$lib/components/MetadataPanel.svelte";
   import VersionsPanel from "$lib/components/VersionsPanel.svelte";
+  import AiSettings from "$lib/components/AiSettings.svelte";
+  import AppearanceSettings from "$lib/components/AppearanceSettings.svelte";
   import type {
     Chapter,
+    IaStatus,
     Project,
     Scene,
     SnapshotMeta,
@@ -24,6 +27,18 @@
     onrestoresnapshot,
     ondeletesnapshot,
     onloadsnapshots,
+    iaStatus,
+    oninstallonnxruntime,
+    onupdatenerengine,
+    oninstallgliner,
+    onupdateembeddings,
+    oninstallembeddings,
+    onupdaterelationshipmodel,
+    onupdatekeeploaded,
+    onupdatecloudprovider,
+    onupdatecloudapikey,
+    onupdatecloudmodel,
+    onindexproject,
   }: {
     chapter: Chapter | null;
     scene: Scene | null;
@@ -45,6 +60,18 @@
     onrestoresnapshot: (id: string) => void;
     ondeletesnapshot: (id: string) => void;
     onloadsnapshots: () => void;
+    iaStatus: IaStatus | null;
+    oninstallonnxruntime: () => void;
+    onupdatenerengine: (engine: string) => void;
+    oninstallgliner: () => void;
+    onupdateembeddings: (enabled: boolean) => void;
+    oninstallembeddings: () => void;
+    onupdaterelationshipmodel: (model: string | null) => void;
+    onupdatekeeploaded: (enabled: boolean) => void;
+    onupdatecloudprovider: (provider: string | null) => void;
+    onupdatecloudapikey: (key: string | null) => void;
+    onupdatecloudmodel: (model: string | null) => void;
+    onindexproject: () => void;
   } = $props();
 
   type Tab = "assistant" | "meta" | "versions" | "settings";
@@ -100,24 +127,49 @@
       />
     {:else}
       <div class="settings-panel">
-        <h4>Niveles</h4>
-        <p class="hint">
-          Renombra las etiquetas de la jerarquía de tu manuscrito. Por ejemplo,
-          «Volúmenes» y «Capítulos», o «Partes» y «Escenas».
-        </p>
-        <label class="field">
-          <span>Primer nivel</span>
-          <input class="input" bind:value={level1Name} placeholder="Capítulos" />
-        </label>
-        <label class="field">
-          <span>Segundo nivel</span>
-          <input class="input" bind:value={level2Name} placeholder="Escenas" />
-        </label>
-        <button
-          class="btn btn-primary"
-          onclick={saveLevels}
-          disabled={!level1Name.trim() || !level2Name.trim()}
-        >Guardar niveles</button>
+        <section>
+          <h4>Estructura</h4>
+          <p class="hint">
+            Renombra las etiquetas de la jerarquía de tu manuscrito. Por ejemplo,
+            «Volúmenes» y «Capítulos», o «Partes» y «Escenas».
+          </p>
+          <label class="field">
+            <span>Primer nivel</span>
+            <input class="input" bind:value={level1Name} placeholder="Capítulos" />
+          </label>
+          <label class="field">
+            <span>Segundo nivel</span>
+            <input class="input" bind:value={level2Name} placeholder="Escenas" />
+          </label>
+          <button
+            class="btn btn-primary"
+            onclick={saveLevels}
+            disabled={!level1Name.trim() || !level2Name.trim()}
+          >Guardar niveles</button>
+        </section>
+
+        <section>
+          <h4>Inteligencia artificial</h4>
+          <AiSettings
+            {iaStatus}
+            {oninstallonnxruntime}
+            {onupdatenerengine}
+            {oninstallgliner}
+            {onupdateembeddings}
+            {oninstallembeddings}
+            {onupdaterelationshipmodel}
+            {onupdatekeeploaded}
+            {onupdatecloudprovider}
+            {onupdatecloudapikey}
+            {onupdatecloudmodel}
+            {onindexproject}
+          />
+        </section>
+
+        <section>
+          <h4>Apariencia</h4>
+          <AppearanceSettings />
+        </section>
       </div>
     {/if}
   </div>
@@ -165,8 +217,21 @@
   .settings-panel {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 20px;
     padding: 16px 20px;
+  }
+
+  .settings-panel section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-panel section:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
   }
 
   .settings-panel h4 {

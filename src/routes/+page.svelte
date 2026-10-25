@@ -10,6 +10,7 @@
   import SpellPanel from "$lib/components/SpellPanel.svelte";
   import QuickSwitcher from "$lib/components/QuickSwitcher.svelte";
   import * as api from "$lib/api";
+  import { applyTheme, getTheme } from "$lib/theme";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { listen } from "@tauri-apps/api/event";
   import type {
@@ -136,6 +137,16 @@
   onMount(async () => {
     await loadProjects();
     await loadIaStatus();
+  });
+
+  onMount(() => {
+    applyTheme(getTheme());
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      if (getTheme() === "system") applyTheme("system");
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   });
 
   onMount(() => {
@@ -524,6 +535,10 @@
     try {
       await api.updateChapterMeta(selectedChapterId, status, summary);
       if (selectedProjectId) chapters = await api.listChapters(selectedProjectId);
+      // Análisis automático en segundo plano al marcar como revisado/final.
+      if (status === "revised" || status === "final") {
+        void analyze();
+      }
     } catch (e) {
       reportError(e);
     }
@@ -708,7 +723,16 @@
   }
 
   async function chat(message: string): Promise<string> {
-    return await api.chat(message, iaStatus?.settings.llm_model ?? null);
+    return await api.chat(message, iaStatus?.settings.llm_model ?? null, selectedProjectId);
+  }
+
+  async function indexProject() {
+    if (!selectedProjectId) return;
+    try {
+      await api.indexProject(selectedProjectId);
+    } catch (e) {
+      reportError(e);
+    }
   }
 
   function logChange(summary: string) {
@@ -769,6 +793,50 @@
     if (!iaStatus) return;
     try {
       const settings = { ...iaStatus.settings, keep_loaded: enabled };
+      const saved = await api.iaSetSettings(settings);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateRelationshipModel(model: string | null) {
+    if (!iaStatus) return;
+    try {
+      const settings = { ...iaStatus.settings, relationship_model: model };
+      const saved = await api.iaSetSettings(settings);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateCloudProvider(provider: string | null) {
+    if (!iaStatus) return;
+    try {
+      const settings = { ...iaStatus.settings, cloud_provider: provider };
+      const saved = await api.iaSetSettings(settings);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateCloudApiKey(key: string | null) {
+    if (!iaStatus) return;
+    try {
+      const settings = { ...iaStatus.settings, cloud_api_key: key };
+      const saved = await api.iaSetSettings(settings);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateCloudModel(model: string | null) {
+    if (!iaStatus) return;
+    try {
+      const settings = { ...iaStatus.settings, cloud_model: model };
       const saved = await api.iaSetSettings(settings);
       iaStatus = { ...iaStatus, settings: saved };
     } catch (e) {
@@ -1155,6 +1223,18 @@
             onrestoresnapshot={restoreSnapshot}
             ondeletesnapshot={deleteSnapshot}
             onloadsnapshots={loadSnapshots}
+            {iaStatus}
+            oninstallonnxruntime={installOnnxRuntime}
+            onupdatenerengine={updateNerEngine}
+            oninstallgliner={installGliner}
+            onupdateembeddings={updateEmbeddings}
+            oninstallembeddings={installEmbeddings}
+            onupdaterelationshipmodel={updateRelationshipModel}
+            onupdatekeeploaded={updateKeepLoaded}
+            onupdatecloudprovider={updateCloudProvider}
+            onupdatecloudapikey={updateCloudApiKey}
+            onupdatecloudmodel={updateCloudModel}
+            onindexproject={indexProject}
           />
         </aside>
       {/if}
@@ -1179,18 +1259,11 @@
       {analyzing}
       {enriching}
       progress={analyzeProgress}
-      {iaStatus}
       {changeLog}
       onanalyze={analyze}
       onenrich={enrich}
       ondeletecharacter={deleteCharacter}
       ondeleteentity={deleteEntity}
-      onupdateembeddings={updateEmbeddings}
-      oninstallembeddings={installEmbeddings}
-      onupdatenerengine={updateNerEngine}
-      oninstallgliner={installGliner}
-      oninstallonnxruntime={installOnnxRuntime}
-      onupdatekeeploaded={updateKeepLoaded}
       onclose={() => (worldOpen = false)}
     />
   {/if}

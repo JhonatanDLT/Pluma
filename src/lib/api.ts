@@ -131,8 +131,11 @@ export const enrichProject = (projectId: string, model: string | null) =>
   invoke<Character[]>("enrich_project", { projectId, model });
 export const correctText = (text: string, model: string | null) =>
   invoke<string>("correct_text", { text, model });
-export const chat = (message: string, model: string | null) =>
-  invoke<string>("chat", { message, model });
+export const chat = (message: string, model: string | null, projectId: string | null) =>
+  invoke<string>("chat", { message, model, projectId });
+
+export const indexProject = (projectId: string) =>
+  invoke<number>("index_project", { projectId });
 
 // Ortografía (Hunspell, sin LLM)
 export const spellCheck = (text: string) =>

@@ -162,3 +162,25 @@ strsim = "0.11"                      # similitud de cadenas
 | `mistral.rs` aumenta el binario (~decenas de MB + modelo) | Mantenerlo **opcional** (feature flag) y ofrecer Ollama |
 | Modelos grandes → latencia en CPU | Análisis bajo demanda y en *background task* de Tauri |
 | Alucinaciones del LLM en relaciones/fichas | Mostrar siempre como **sugerencia** editable; nunca sobrescribir |
+
+---
+
+## 9. Validación de Laya (decision models) — 2026
+
+Se evaluaron los checkpoints de la familia **Laya** (`convaiinnovations`):
+
+| Checkpoint | Encoder | Params | Idiomas | Veredicto |
+|-----------|---------|--------|---------|-----------|
+| `laya-multilingual` | mmBERT-base | 322M | 100+ | **Descartado**: *decision model*, zero-shot ≈ azar (0.342 vs 0.318) |
+| `laya-typed-decisions` | ModernBERT-large | 421M | solo EN | **Descartado**: especialista en 4 flujos sintéticos, no literario |
+
+**Por qué se descarta**: Laya **no es** un clasificador texto→etiqueta. Es un *System 1
+decision model* (estado + preguntas tipadas `choice`/`score`/`noul` → respuestas con
+probabilidad), y el propio README advierte *«near chance zero-shot, fine-tune for a
+specific workflow»*. Además sale **sin calibrar** (ECE alto). Para tipado de relaciones
+multilingüe se usa un **SLM (Qwen) con salida JSON**, que sí funciona zero-shot.
+
+> **Nota**: la arquitectura de Laya (option-markers, espacio de respuesta por request, no
+> autoregresiva, batched) es interesante y podría re-evaluarse si algún día se **fine-tunea**
+> sobre un corpus literario etiquetado (p. ej. clasificar POV o división de escenas). No es
+> una prioridad.

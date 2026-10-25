@@ -155,11 +155,12 @@ strsim = "0.11"              # similitud de cadenas (Levenshtein/Jaro)
 
 | Componente | RAM (aprox.) | Disco | GPU |
 |-----------|--------------|-------|-----|
-| Embeddings `e5-small` | ~300 MB | ~118 MB | No |
-| NER cuantizado | ~300 MB | ~150 MB | No |
-| LLM `qwen2.5:1.5b` | ~1.5–2 GB | ~1.0 GB | No (CPU ok) |
+| Embeddings `multilingual-e5-small` | ~300 MB | ~118 MB | No |
+| NER GLiNER2 (`gliner2-multi-v1`) | ~1 GB | ~1 GB | No |
+| LLM `qwen2.5:1.5b` (Ollama) | ~1.5–2 GB | ~1.0 GB | No (CPU ok) |
 
-> Total con todo: < ~2.5 GB RAM en picos de análisis. Sin LLM: < ~700 MB.
+> Total con todo local: ~3 GB RAM en picos de análisis. Sin LLM (GLiNER2 + embeddings): ~1.3–1.5 GB.
+> Los modelos se cargan/liberan por uso salvo perfil `keep_loaded`: el pico es transitorio.
 
 ---
 
@@ -171,3 +172,58 @@ strsim = "0.11"              # similitud de cadenas (Levenshtein/Jaro)
 | Alias mal agrupados | Umbral de similitud configurable + revisión del usuario |
 | LLM alucina relaciones | Mostrar siempre como **sugerencia** editable; nunca sobrescribir |
 | Carga de CPU al analizar en tiempo real | Análisis **bajo demanda** (botón) y en *background task* de Tauri |
+
+---
+
+## 8. Estado validado (2026) y notas de optimización
+
+### Validado en pruebas reales (cap. 1 de *Lord of the Mysteries*, español)
+
+- **GLiNER2** (`gliner2-multi-v1`):
+  - Reglas agnósticas → 7 entidades con ruido (lugares/idiomas como personajes, nombres
+    compuestos fragmentados).
+  - GLiNER2 → personas completas (`Zhou Mingrui`, `Klein Moretti`), cero ruido, y separa
+    `person` / `location` / `organization`. **GLiNER2 es el NER real; las reglas son un
+    fallback burdo sin diccionarios.**
+- **SLM para tipado de relaciones** (Ollama `qwen2.5:1.5b`): funciona de punta a punta (~1–2 s).
+  - Hallazgo: si se fuerza una categoría, el modelo alucina (devolvió «romance» para la misma
+    persona). Se añadió la categoría `ninguna` y normalización de salida (`nada`/`none`/`mismo`
+    → `ninguna`).
+
+### Notas de optimización (pendientes)
+
+1. **Dedup antes de tipar**: aplicar embeddings de forma más agresiva para unir
+   alias/identidades (ej. transmigración) **antes** de pedir el tipo de relación; evita
+   preguntar «relación» entre dos nombres de la misma entidad.
+2. **Contexto por par**: hoy el SLM recibe el texto completo truncado a 6000 chars; pasar
+   solo las oraciones donde ambos nombres co-ocurren mejora precisión y reduce tokens.
+3. **Batching**: ya se clasifican todos los pares en una sola llamada; acotar por capítulo
+   (ya se hace) para novelas largas.
+4. **Calibración**: tratar `kind` como **sugerencia editable** (ya lo es); no fiarse de la
+   confianza del SLM sin recalibrar.
+5. **Modelo más ligero**: evaluar `qwen2.5:0.5b` para clasificación (más barato) frente a 1.5b.
+
+---
+
+## 9. IA en la nube, RAG y enriquecimiento completo (2026)
+
+### IA en la nube (opt-in, activa por defecto)
+
+- Backend unificado en `llm.rs`: `Backend::Ollama` o `Backend::Cloud`.
+- **`resolve_backend`**: si hay una `cloud_api_key` configurada, se usa la nube; si no, Ollama.
+- Proveedores soportados: **OpenAI** (`/v1/chat/completions`) y **Anthropic** (`/v1/messages`), vía `ureq`.
+- Configuración: `cloud_provider`, `cloud_api_key`, `cloud_model` en `IaSettings` (UI en Ajustes → IA).
+- **Nota de seguridad**: la API key se guarda en texto plano (deuda técnica, ver `docs/08`).
+
+### Chat con contexto (RAG)
+
+- **Indexado** (`rag.rs` + migración `0009`): embebe cada escena con `fastembed` y guarda el vector en la tabla `scene_embeddings`.
+- **Recuperación**: al preguntar, se embebe la consulta y se devuelven las top-3 escenas por similitud coseno.
+- **Integración**: el comando `chat` inyecta el contexto recuperado en el prompt (`chat_with_context`).
+- **Optimizaciones**: el embedder se reutiliza en el análisis y se cachea en el chat (`keep_loaded`); existe `index_project` para indexar sin analizar.
+
+### Enriquecimiento completo de fichas
+
+- `describe_character` devuelve un **perfil estructurado** (`CharacterProfile`: description, biography, traits, goals, arc) en JSON.
+- `enrich_project` persiste todos los campos vía `repo::update_character_profile`.
+- El tipado de relaciones usa la categoría `ninguna` y normalización de salida (`normalize_type`).

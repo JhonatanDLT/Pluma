@@ -1,14 +1,17 @@
 <script lang="ts">
-  import type { Chapter, Scene } from "$lib/types";
+  import type { Chapter, Project, Scene } from "$lib/types";
 
   let {
     chapter,
     scene,
+    project,
     onsavechapter,
     onsavescene,
+    onupdateprojectmeta,
   }: {
     chapter: Chapter | null;
     scene: Scene | null;
+    project: Project | null;
     onsavechapter: (status: string, summary: string | null) => void;
     onsavescene: (meta: {
       status: string;
@@ -17,6 +20,7 @@
       timeLabel: string | null;
       summary: string | null;
     }) => void;
+    onupdateprojectmeta: (author: string | null, description: string | null) => void;
   } = $props();
 
   let chapterStatus = $state("draft");
@@ -27,6 +31,9 @@
   let location = $state("");
   let timeLabel = $state("");
   let sceneSummary = $state("");
+
+  let author = $state("");
+  let description = $state("");
 
   $effect(() => {
     if (chapter) {
@@ -39,6 +46,10 @@
       pov = scene.pov ?? "";
       location = scene.location ?? "";
       timeLabel = scene.time_label ?? "";
+    }
+    if (project) {
+      author = project.author ?? "";
+      description = project.description ?? "";
     }
   });
 
@@ -57,10 +68,31 @@
       });
     }
   }
+
+  function saveProjectMeta() {
+    if (project) {
+      onupdateprojectmeta(author.trim() || null, description.trim() || null);
+    }
+  }
 </script>
 
-{#if chapter || scene}
+{#if project || chapter || scene}
   <div class="meta-panel">
+    {#if project}
+      <section class="meta-section">
+        <h4>Proyecto</h4>
+        <div class="meta-field">
+          <label for="project-author">Autor</label>
+          <input id="project-author" class="input" bind:value={author} placeholder="Nombre del autor" />
+        </div>
+        <div class="meta-field grow">
+          <label for="project-desc">Resumen</label>
+          <textarea id="project-desc" class="input" bind:value={description} rows="2" placeholder="De qué trata la novela…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick={saveProjectMeta}>Guardar proyecto</button>
+      </section>
+    {/if}
+
     {#if chapter}
       <section class="meta-section">
         <h4>Capítulo</h4>

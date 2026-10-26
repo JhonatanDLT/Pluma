@@ -15,6 +15,7 @@ use crate::parser::ParsedManuscript;
 pub fn create_project(
     conn: &Connection,
     title: &str,
+    author: Option<String>,
     goal: i64,
     description: Option<String>,
     cover_path: Option<String>,
@@ -32,6 +33,7 @@ pub fn create_project(
     }
 
     let mut project = Project::new(title);
+    project.author = author;
     project.word_goal = goal;
     project.description = description;
     project.cover_path = cover_path;
@@ -113,6 +115,24 @@ pub fn update_project_goal(conn: &Connection, id: &str, goal: i64) -> Result<Pro
     let affected = conn.execute(
         "UPDATE project SET word_goal = ?1, updated_at = ?2 WHERE id = ?3",
         params![goal, updated_at, id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("proyecto {id}")));
+    }
+    get_project(conn, id)?.ok_or_else(|| AppError::NotFound(format!("proyecto {id}")))
+}
+
+/// Actualiza los metadatos de portada de un proyecto (autor y descripción).
+pub fn update_project_meta(
+    conn: &Connection,
+    id: &str,
+    author: Option<String>,
+    description: Option<String>,
+) -> Result<Project> {
+    let updated_at = Utc::now().to_rfc3339();
+    let affected = conn.execute(
+        "UPDATE project SET author = ?1, description = ?2, updated_at = ?3 WHERE id = ?4",
+        params![author, description, updated_at, id],
     )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("proyecto {id}")));
@@ -1155,7 +1175,7 @@ mod tests {
     #[test]
     fn update_project_levels_renames_levels() {
         let conn = crate::db::test_connection();
-        let project = create_project(&conn, "Novela", 5000, None, None).unwrap();
+        let project = create_project(&conn, "Novela", None, 5000, None, None).unwrap();
         assert_eq!(project.level1_name, "Capítulos");
         assert_eq!(project.level2_name, "Escenas");
 

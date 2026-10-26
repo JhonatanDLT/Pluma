@@ -358,7 +358,8 @@ bloquean el MVP).
 |---|------|-------|------|
 | 1 | RAG | Embeddings guardados como **JSON** (~3 KB/escena) | Migrar a **BLOB binario** (`f32` little-endian) para proyectos grandes |
 | 2 | RAG | Recuperación **sin umbral de relevancia mínima** (coseno a secas) | Filtrar escenas con similitud < umbral para reducir ruido en el contexto |
-| 3 | Nube | **API key en texto plano** (`ia_settings.json`) | Usar *keychain* del SO (p. ej. `keyring`) para almacenarla cifrada |
-| 4 | Búsqueda | Búsqueda del mundo con **LIKE** | Migrar a **FTS5** para ranking y búsqueda difusa cuando el world building crezca |
-| 5 | Rendimiento | `chat` RAG sin `keep_loaded` recarga el embedder por mensaje | Aceptable; con `keep_loaded` se evita. Evaluar cacheado más agresivo |
-| 6 | IA | **Perfiles por capacidad de equipo** (modesto, medio, alto, ultra alto) que elijan modelos automáticamente | Definir presets de modelos (p. ej. modesto=reglas+embeddings, medio=GLiNER2+qwen0.5b, alto=qwen1.5b, ultra=modelos locales 3B+ o GPU) |
+| 3 | Búsqueda | Búsqueda del mundo con **LIKE** | Migrar a **FTS5** para ranking y búsqueda difusa cuando el world building crezca |
+| 4 | Rendimiento | `chat` RAG sin `keep_loaded` recarga el embedder por mensaje | Aceptable; con `keep_loaded` se evita. Evaluar cacheado más agresivo |
+
+> Resueltos (2026): **API key cifrada en el llavero del SO** y **perfiles por capacidad
+> de equipo** (ver `docs/03` §9 y §10).

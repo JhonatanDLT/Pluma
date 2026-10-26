@@ -111,9 +111,9 @@ export interface IaSettings {
   llm_model: string | null;
   relationship_model: string | null;
   cloud_provider: string | null;
-  cloud_api_key: string | null;
   cloud_model: string | null;
   keep_loaded: boolean;
+  profile: string | null;
 }
 
 export interface IaStatus {
@@ -122,6 +122,23 @@ export interface IaStatus {
   gliner_cached: boolean;
   onnxruntime_available: boolean;
   ollama_available: boolean;
+  cloud_key_set: boolean;
+}
+
+export interface CloudProviderInfo {
+  id: string;
+  label: string;
+  default_model: string;
+}
+
+export interface ProfileInfo {
+  id: string;
+  label: string;
+  description: string;
+  min_ram: string;
+  min_cpu: string;
+  min_disk: string;
+  gpu: string;
 }
 
 export type EditorMode = "wysiwyg" | "source";

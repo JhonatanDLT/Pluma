@@ -17,6 +17,153 @@ pub const GRAMMAR_MODEL: &str = "qwen2.5:0.5b";
 /// Modelo en la nube por defecto.
 pub const DEFAULT_CLOUD_MODEL: &str = "gpt-4o-mini";
 
+/// Endpoint OpenAI-compatible por defecto.
+const DEFAULT_OPENAI_BASE: &str = "https://api.openai.com/v1/chat/completions";
+
+/// Información pública de un proveedor de IA en la nube (expuesta a la UI).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CloudProviderInfo {
+    pub id: String,
+    pub label: String,
+    pub default_model: String,
+}
+
+/// Tipo de endpoint que usa un proveedor de nube.
+enum CloudKind {
+    /// Formato OpenAI-compatible (`POST {base}` con `messages` + Bearer).
+    OpenAi { base: &'static str },
+    /// Formato Anthropic (`/v1/messages`).
+    Anthropic,
+    /// Formato Google Gemini (`generateContent`).
+    Gemini,
+}
+
+struct CloudSpec {
+    id: &'static str,
+    label: &'static str,
+    default_model: &'static str,
+    kind: CloudKind,
+}
+
+const CLOUD_PROVIDERS: &[CloudSpec] = &[
+    CloudSpec {
+        id: "openai",
+        label: "OpenAI",
+        default_model: "gpt-4o-mini",
+        kind: CloudKind::OpenAi {
+            base: DEFAULT_OPENAI_BASE,
+        },
+    },
+    CloudSpec {
+        id: "anthropic",
+        label: "Anthropic",
+        default_model: "claude-3-5-haiku-latest",
+        kind: CloudKind::Anthropic,
+    },
+    CloudSpec {
+        id: "gemini",
+        label: "Google Gemini",
+        default_model: "gemini-2.0-flash",
+        kind: CloudKind::Gemini,
+    },
+    CloudSpec {
+        id: "groq",
+        label: "Groq",
+        default_model: "llama-3.3-70b-versatile",
+        kind: CloudKind::OpenAi {
+            base: "https://api.groq.com/openai/v1/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "mistral",
+        label: "Mistral AI",
+        default_model: "mistral-small-latest",
+        kind: CloudKind::OpenAi {
+            base: "https://api.mistral.ai/v1/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "deepseek",
+        label: "DeepSeek",
+        default_model: "deepseek-chat",
+        kind: CloudKind::OpenAi {
+            base: "https://api.deepseek.com/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "openrouter",
+        label: "OpenRouter",
+        default_model: "openai/gpt-4o-mini",
+        kind: CloudKind::OpenAi {
+            base: "https://openrouter.ai/api/v1/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "xai",
+        label: "xAI (Grok)",
+        default_model: "grok-2-latest",
+        kind: CloudKind::OpenAi {
+            base: "https://api.x.ai/v1/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "together",
+        label: "Together AI",
+        default_model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        kind: CloudKind::OpenAi {
+            base: "https://api.together.xyz/v1/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "fireworks",
+        label: "Fireworks AI",
+        default_model: "accounts/fireworks/models/llama-v3p1-70b-instruct",
+        kind: CloudKind::OpenAi {
+            base: "https://api.fireworks.ai/inference/v1/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "cohere",
+        label: "Cohere",
+        default_model: "command-r-plus",
+        kind: CloudKind::OpenAi {
+            base: "https://api.cohere.com/compatibility/v1/chat/completions",
+        },
+    },
+    CloudSpec {
+        id: "perplexity",
+        label: "Perplexity",
+        default_model: "sonar",
+        kind: CloudKind::OpenAi {
+            base: "https://api.perplexity.ai/chat/completions",
+        },
+    },
+];
+
+/// Lista de proveedores de nube soportados (para poblar la UI).
+pub fn cloud_providers() -> Vec<CloudProviderInfo> {
+    CLOUD_PROVIDERS
+        .iter()
+        .map(|p| CloudProviderInfo {
+            id: p.id.to_string(),
+            label: p.label.to_string(),
+            default_model: p.default_model.to_string(),
+        })
+        .collect()
+}
+
+/// Modelo por defecto de un proveedor (cae a `DEFAULT_CLOUD_MODEL` si no se conoce).
+fn default_model_for(provider: &str) -> String {
+    lookup_provider(provider)
+        .map(|p| p.default_model.to_string())
+        .unwrap_or_else(|| DEFAULT_CLOUD_MODEL.to_string())
+}
+
+fn lookup_provider(id: &str) -> Option<&'static CloudSpec> {
+    let id = id.to_lowercase();
+    CLOUD_PROVIDERS.iter().find(|p| p.id == id.as_str())
+}
+
 /// Backend de generación: Ollama local o una API en la nube.
 pub enum Backend {
     Ollama {
@@ -40,26 +187,38 @@ impl Backend {
             } => generate_cloud(provider, api_key, model, prompt),
         }
     }
+
+    /// Genera texto forzando salida JSON. En Ollama usa el modo `format: json`
+    /// de la API; en la nube usa `response_format` (OpenAI-compatible) o
+    /// `responseMimeType` (Gemini) donde el proveedor lo soporta.
+    pub fn generate_json(&self, prompt: &str) -> Result<String> {
+        match self {
+            Backend::Ollama { model } => generate_ollama_json(model, prompt),
+            Backend::Cloud {
+                provider,
+                api_key,
+                model,
+            } => generate_cloud_json(provider, api_key, model, prompt),
+        }
+    }
 }
 
 /// Resuelve el backend activo a partir de la configuración: si hay una API key en
 /// la nube, se usa la nube (activa por defecto); si no, Ollama.
 pub fn resolve_backend(settings: &IaSettings, model: Option<&str>, default_model: &str) -> Backend {
-    if let Some(key) = settings
-        .cloud_api_key
-        .as_deref()
-        .filter(|k| !k.trim().is_empty())
-    {
+    if let Some(key) = crate::secrets::get_cloud_api_key() {
+        let provider = settings
+            .cloud_provider
+            .clone()
+            .unwrap_or_else(|| "openai".to_string());
+        let cloud_model = settings
+            .cloud_model
+            .clone()
+            .unwrap_or_else(|| default_model_for(&provider));
         Backend::Cloud {
-            provider: settings
-                .cloud_provider
-                .clone()
-                .unwrap_or_else(|| "openai".to_string()),
-            api_key: key.to_string(),
-            model: settings
-                .cloud_model
-                .clone()
-                .unwrap_or_else(|| DEFAULT_CLOUD_MODEL.to_string()),
+            provider,
+            api_key: key,
+            model: cloud_model,
         }
     } else {
         Backend::Ollama {
@@ -89,30 +248,126 @@ fn generate_ollama(model: &str, prompt: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Genera texto con una API en la nube (OpenAI-compatible o Anthropic).
+/// Genera texto con Ollama forzando salida JSON válida (`format: json` de la API).
+fn generate_ollama_json(model: &str, prompt: &str) -> Result<String> {
+    let body = serde_json::json!({
+        "model": model,
+        "prompt": prompt,
+        "stream": false,
+        "format": "json",
+    });
+
+    let response = ureq::post("http://localhost:11434/api/generate")
+        .set("Content-Type", "application/json")
+        .send_string(&body.to_string())
+        .map_err(|e| {
+            AppError::Internal(format!(
+                "error al llamar a Ollama (¿está el servidor en localhost:11434?): {e}"
+            ))
+        })?;
+
+    let text = response
+        .into_string()
+        .map_err(|e| AppError::Internal(format!("error al leer la respuesta de Ollama: {e}")))?;
+    parse_ollama_response(&text)
+}
+
+fn parse_ollama_response(body: &str) -> Result<String> {
+    let v: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| AppError::Internal(format!("respuesta JSON inválida de Ollama: {e}")))?;
+    v["response"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| AppError::Internal("respuesta de Ollama sin contenido".into()))
+}
+
+/// Genera texto con una API en la nube, según el proveedor configurado.
 fn generate_cloud(provider: &str, api_key: &str, model: &str, prompt: &str) -> Result<String> {
-    match provider.to_lowercase().as_str() {
-        "anthropic" | "claude" => generate_anthropic(api_key, model, prompt),
-        _ => generate_openai(api_key, model, prompt),
+    generate_cloud_inner(provider, api_key, model, prompt, false)
+}
+
+/// Genera texto en la nube forzando salida JSON (donde el proveedor lo soporta).
+fn generate_cloud_json(provider: &str, api_key: &str, model: &str, prompt: &str) -> Result<String> {
+    generate_cloud_inner(provider, api_key, model, prompt, true)
+}
+
+fn generate_cloud_inner(
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    json: bool,
+) -> Result<String> {
+    match lookup_provider(provider).map(|p| &p.kind) {
+        Some(CloudKind::Anthropic) => generate_anthropic(api_key, model, prompt),
+        Some(CloudKind::Gemini) => generate_gemini(api_key, model, prompt, json),
+        Some(CloudKind::OpenAi { base }) => {
+            generate_openai_compatible(base, api_key, model, prompt, json)
+        }
+        // Proveedor no reconocido: se trata como OpenAI-compatible por defecto.
+        None => generate_openai_compatible(DEFAULT_OPENAI_BASE, api_key, model, prompt, json),
     }
 }
 
-fn generate_openai(api_key: &str, model: &str, prompt: &str) -> Result<String> {
-    let body = serde_json::json!({
+/// Genera texto con un endpoint OpenAI-compatible (OpenAI, Groq, Mistral, etc.).
+fn generate_openai_compatible(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    json: bool,
+) -> Result<String> {
+    let mut body = serde_json::json!({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
     });
+    if json {
+        body["response_format"] = serde_json::json!({ "type": "json_object" });
+    }
 
-    let response = ureq::post("https://api.openai.com/v1/chat/completions")
+    let response = ureq::post(base_url)
         .set("Authorization", &format!("Bearer {api_key}"))
         .set("Content-Type", "application/json")
         .send_string(&body.to_string())
-        .map_err(|e| AppError::Internal(format!("error al llamar a la API de OpenAI: {e}")))?;
+        .map_err(|e| AppError::Internal(format!("error al llamar a la API ({base_url}): {e}")))?;
 
     let text = response
         .into_string()
         .map_err(|e| AppError::Internal(format!("error al leer la respuesta: {e}")))?;
     parse_openai_response(&text)
+}
+
+/// Genera texto con Google Gemini (`generateContent`).
+fn generate_gemini(api_key: &str, model: &str, prompt: &str, json: bool) -> Result<String> {
+    let mut body = serde_json::json!({
+        "contents": [{"parts": [{"text": prompt}]}],
+    });
+    if json {
+        body["generationConfig"] = serde_json::json!({ "responseMimeType": "application/json" });
+    }
+
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    );
+
+    let response = ureq::post(&url)
+        .set("Content-Type", "application/json")
+        .send_string(&body.to_string())
+        .map_err(|e| AppError::Internal(format!("error al llamar a la API de Gemini: {e}")))?;
+
+    let text = response
+        .into_string()
+        .map_err(|e| AppError::Internal(format!("error al leer la respuesta: {e}")))?;
+    parse_gemini_response(&text)
+}
+
+fn parse_gemini_response(body: &str) -> Result<String> {
+    let v: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| AppError::Internal(format!("respuesta JSON inválida de Gemini: {e}")))?;
+    v["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| AppError::Internal("respuesta de Gemini sin contenido".into()))
 }
 
 fn parse_openai_response(body: &str) -> Result<String> {
@@ -184,7 +439,7 @@ pub fn describe_character(
          \"traits\":[\"rasgo1\",\"rasgo2\"],\"goals\":[\"objetivo1\"],\"arc\":\"arco narrativo\"}}\n\n\
          Texto:\n{context}"
     );
-    let raw = backend.generate(&prompt)?;
+    let raw = backend.generate_json(&prompt)?;
     let json = extract_json(&raw);
     serde_json::from_str(&json).map_err(|e| {
         AppError::Internal(format!("el modelo no devolvió una ficha JSON válida: {e}"))
@@ -272,7 +527,7 @@ pub fn type_relationships(
          Pares a clasificar:\n{pairs_list}\n\nTexto:\n{context}"
     );
 
-    let raw = backend.generate(&prompt)?;
+    let raw = backend.generate_json(&prompt)?;
     let json = extract_json(&raw);
     let parsed: RelationPayload = serde_json::from_str(&json)
         .map_err(|e| AppError::Internal(format!("el modelo no devolvió JSON válido: {e}")))?;
@@ -316,10 +571,66 @@ fn normalize_type(raw: &str) -> String {
 
 /// Extrae el primer objeto JSON de la salida del modelo (ignora markdown y texto
 /// explicativo alrededor).
+/// Extrae el primer objeto JSON del texto y repara los caracteres de control que
+/// algunos LLM emiten sin escapar dentro de las cadenas (p. ej. saltos de línea
+/// literales), lo que de otro modo hace fallar a `serde_json`.
 fn extract_json(raw: &str) -> String {
-    match (raw.find('{'), raw.rfind('}')) {
-        (Some(s), Some(e)) if e > s => raw[s..=e].to_string(),
-        _ => raw.to_string(),
+    let slice = match (raw.find('{'), raw.rfind('}')) {
+        (Some(s), Some(e)) if e > s => &raw[s..=e],
+        _ => raw,
+    };
+    sanitize_json(slice)
+}
+
+/// Escapa los caracteres de control (`\u{0000}`–`\u{001F}`) que aparecen sin
+/// escapar dentro de los valores de cadena de un JSON, respetando los que ya
+/// están escapados con `\`.
+fn sanitize_json(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for ch in raw.chars() {
+        if in_string {
+            if escaped {
+                // El carácter anterior era un backslash: este ya está escapado.
+                out.push(ch);
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => {
+                    out.push(ch);
+                    escaped = true;
+                }
+                '"' => {
+                    out.push(ch);
+                    in_string = false;
+                }
+                c if ('\u{0000}'..='\u{001F}').contains(&c) => {
+                    out.push_str(&escape_control(c));
+                }
+                c => out.push(c),
+            }
+        } else {
+            if ch == '"' {
+                in_string = true;
+            }
+            out.push(ch);
+        }
+    }
+
+    out
+}
+
+fn escape_control(c: char) -> String {
+    match c {
+        '\n' => "\\n".to_string(),
+        '\r' => "\\r".to_string(),
+        '\t' => "\\t".to_string(),
+        '\u{0008}' => "\\b".to_string(),
+        '\u{000C}' => "\\f".to_string(),
+        other => format!("\\u{:04x}", other as u32),
     }
 }
 
@@ -339,6 +650,27 @@ mod tests {
         let p: RelationPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(p.relaciones[0].a, "Ana");
         assert_eq!(p.relaciones[0].tipo, "familia");
+    }
+
+    #[test]
+    fn escapes_literal_control_chars_in_strings() {
+        // Un salto de línea literal dentro de un string (error "control character").
+        let raw = "{\"description\":\"Una joven decidida\nque vive en Tingen\",\"traits\":[\"obstinada\"]}";
+        let json = extract_json(raw);
+        let p: CharacterProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            p.description.as_deref(),
+            Some("Una joven decidida\nque vive en Tingen")
+        );
+        assert_eq!(p.traits, vec!["obstinada"]);
+    }
+
+    #[test]
+    fn preserves_already_escaped_sequences() {
+        let raw = "{\"description\":\"a\\nb\"}";
+        let json = extract_json(raw);
+        let p: CharacterProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(p.description.as_deref(), Some("a\nb"));
     }
 
     #[test]
@@ -365,6 +697,30 @@ mod tests {
     fn parses_anthropic_response() {
         let body = r#"{"content":[{"type":"text","text":"Hola mundo"}]}"#;
         assert_eq!(parse_anthropic_response(body).unwrap(), "Hola mundo");
+    }
+
+    #[test]
+    fn parses_ollama_response() {
+        let body = r#"{"model":"qwen2.5:1.5b","response":"{\"description\":\"ok\"}","done":true}"#;
+        assert_eq!(
+            parse_ollama_response(body).unwrap(),
+            "{\"description\":\"ok\"}"
+        );
+    }
+
+    #[test]
+    fn parses_gemini_response() {
+        let body = r#"{"candidates":[{"content":{"parts":[{"text":"Hola"}]}}]}"#;
+        assert_eq!(parse_gemini_response(body).unwrap(), "Hola");
+    }
+
+    #[test]
+    fn lists_cloud_providers() {
+        let providers = cloud_providers();
+        assert!(providers.len() >= 10);
+        for expected in ["openai", "anthropic", "gemini", "groq", "mistral"] {
+            assert!(providers.iter().any(|p| p.id == expected));
+        }
     }
 
     #[test]

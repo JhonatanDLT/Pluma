@@ -5,7 +5,34 @@
   import Placeholder from "@tiptap/extension-placeholder";
   import Link from "@tiptap/extension-link";
   import Underline from "@tiptap/extension-underline";
+  import Image from "@tiptap/extension-image";
+  import Table from "@tiptap/extension-table";
+  import TableRow from "@tiptap/extension-table-row";
+  import TableHeader from "@tiptap/extension-table-header";
+  import TableCell from "@tiptap/extension-table-cell";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { htmlToMarkdown, markdownToHtml } from "$lib/markdown";
+
+  const ImageWithPath = Image.extend({
+    addAttributes() {
+      return {
+        ...this.parent?.(),
+        "data-path": {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-path"),
+        },
+        width: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("width"),
+        },
+        height: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("height"),
+        },
+      };
+    },
+  });
 
   let {
     content,
@@ -29,6 +56,8 @@
   let replaceText = $state("");
   let findIndex = $state(-1);
   let findInput = $state<HTMLInputElement | undefined>(undefined);
+  let imageWidth = $state("");
+  let tab = $state<"inicio" | "insertar">("inicio");
 
   let active = $state({
     bold: false,
@@ -44,6 +73,7 @@
     blockquote: false,
     codeBlock: false,
     link: false,
+    image: false,
   });
 
   function refreshActive() {
@@ -61,7 +91,10 @@
       blockquote: editor.isActive("blockquote"),
       codeBlock: editor.isActive("codeBlock"),
       link: editor.isActive("link"),
+      image: editor.isActive("image"),
     };
+    const attrs = editor.getAttributes("image");
+    imageWidth = attrs.width ? String(attrs.width) : "";
   }
 
   onMount(() => {
@@ -71,6 +104,11 @@
         StarterKit,
         Underline,
         Link.configure({ openOnClick: false, autolink: true }),
+        ImageWithPath.configure({ inline: false, allowBase64: false }),
+        Table.configure({ resizable: true }),
+        TableRow,
+        TableHeader,
+        TableCell,
         Placeholder.configure({ placeholder }),
       ],
       content: markdownToHtml(content),
@@ -99,6 +137,41 @@
   function run(command: () => void) {
     command();
     refreshActive();
+  }
+
+  function insertTable() {
+    run(() =>
+      editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+    );
+  }
+
+  function applyImageWidth() {
+    const w = Number(imageWidth);
+    if (!Number.isFinite(w) || w <= 0) return;
+    run(() => editor.chain().focus().updateAttributes("image", { width: w }).run());
+  }
+
+  async function insertImage() {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      title: "Insertar imagen",
+      filters: [{ name: "Imágenes", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (typeof selected !== "string") return;
+    try {
+      const path = await invoke<string>("persist_image", { source: selected });
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: "image",
+          attrs: { src: convertFileSrc(path), alt: "", "data-path": path },
+        })
+        .run();
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   function toggleLink() {
@@ -183,71 +256,131 @@
 </script>
 
 <div class="editor">
-  <div class="toolbar">
-    <button class="btn-icon" class:is-active={active.bold} title="Negrita" onclick={() => run(() => editor.chain().focus().toggleBold().run())}>
-      <strong>B</strong>
-    </button>
-    <button class="btn-icon" class:is-active={active.italic} title="Cursiva" onclick={() => run(() => editor.chain().focus().toggleItalic().run())}>
-      <em>I</em>
-    </button>
-    <button class="btn-icon" class:is-active={active.underline} title="Subrayado" onclick={() => run(() => editor.chain().focus().toggleUnderline().run())}>
-      <u>U</u>
-    </button>
-    <button class="btn-icon" class:is-active={active.strike} title="Tachado" onclick={() => run(() => editor.chain().focus().toggleStrike().run())}>
-      <s>S</s>
-    </button>
-    <button class="btn-icon" class:is-active={active.code} title="Código en línea" onclick={() => run(() => editor.chain().focus().toggleCode().run())}>
-      {"</>"}
-    </button>
-
-    <span class="divider"></span>
-
-    <button class="btn-icon" class:is-active={active.h1} title="Título 1" onclick={() => run(() => editor.chain().focus().toggleHeading({ level: 1 }).run())}>H1</button>
-    <button class="btn-icon" class:is-active={active.h2} title="Título 2" onclick={() => run(() => editor.chain().focus().toggleHeading({ level: 2 }).run())}>H2</button>
-    <button class="btn-icon" class:is-active={active.h3} title="Título 3" onclick={() => run(() => editor.chain().focus().toggleHeading({ level: 3 }).run())}>H3</button>
-
-    <span class="divider"></span>
-
-    <button class="btn-icon" class:is-active={active.bulletList} title="Lista con viñetas" onclick={() => run(() => editor.chain().focus().toggleBulletList().run())}>•</button>
-    <button class="btn-icon" class:is-active={active.orderedList} title="Lista numerada" onclick={() => run(() => editor.chain().focus().toggleOrderedList().run())}>1.</button>
-    <button class="btn-icon" class:is-active={active.blockquote} title="Cita" onclick={() => run(() => editor.chain().focus().toggleBlockquote().run())}>❝</button>
-    <button class="btn-icon" class:is-active={active.codeBlock} title="Bloque de código" onclick={() => run(() => editor.chain().focus().toggleCodeBlock().run())}>{"{ }"}</button>
-
-    <span class="divider"></span>
-
-    <button class="btn-icon" title="Línea horizontal" onclick={() => run(() => editor.chain().focus().setHorizontalRule().run())}>—</button>
-    <button class="btn-icon" class:is-active={active.link} title="Enlace" onclick={toggleLink}>🔗</button>
-
-    {#if linkOpen}
-      <div class="link-pop">
-        <input
-          class="input"
-          bind:this={linkInput}
-          bind:value={linkUrl}
-          placeholder="https://…"
-          onkeydown={(e) => {
-            if (e.key === "Enter") applyLink();
-            if (e.key === "Escape") (linkOpen = false);
-          }}
-        />
-        <button class="btn btn-primary" onclick={applyLink}>Aplicar</button>
-      </div>
-    {/if}
-
-    <span class="spacer"></span>
-
-    <button
-      class="btn-icon"
-      class:is-active={findOpen}
-      title="Buscar y reemplazar (Ctrl/Cmd F)"
-      onclick={() => {
-        findOpen = !findOpen;
-        queueMicrotask(() => findInput?.focus());
-      }}
-    >🔍</button>
-    <button class="btn-icon" title="Deshacer" onclick={() => run(() => editor.chain().focus().undo().run())}>↶</button>
-    <button class="btn-icon" title="Rehacer" onclick={() => run(() => editor.chain().focus().redo().run())}>↷</button>
+  <div class="ribbon">
+  <div class="ribbon-tabs">
+    <button class="ribbon-tab" class:active={tab === "inicio"} onclick={() => (tab = "inicio")}>Inicio</button>
+    <button class="ribbon-tab" class:active={tab === "insertar"} onclick={() => (tab = "insertar")}>Insertar</button>
   </div>
+
+  <div class="ribbon-panel">
+    {#if tab === "inicio"}
+      <div class="ribbon-group">
+        <span class="group-label">Fuente</span>
+        <div class="group-buttons">
+          <button class="ribbon-btn" class:is-active={active.bold} title="Negrita (Cmd/Ctrl+B)" onclick={() => run(() => editor.chain().focus().toggleBold().run())}>
+            <span class="ribbon-icon"><strong>B</strong></span><span class="ribbon-label">Negrita</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.italic} title="Cursiva (Cmd/Ctrl+I)" onclick={() => run(() => editor.chain().focus().toggleItalic().run())}>
+            <span class="ribbon-icon"><em>I</em></span><span class="ribbon-label">Cursiva</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.underline} title="Subrayado" onclick={() => run(() => editor.chain().focus().toggleUnderline().run())}>
+            <span class="ribbon-icon"><u>U</u></span><span class="ribbon-label">Subrayado</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.strike} title="Tachado" onclick={() => run(() => editor.chain().focus().toggleStrike().run())}>
+            <span class="ribbon-icon"><s>S</s></span><span class="ribbon-label">Tachado</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.code} title="Código en línea" onclick={() => run(() => editor.chain().focus().toggleCode().run())}>
+            <span class="ribbon-icon">{"</>"}</span><span class="ribbon-label">Código</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="ribbon-group">
+        <span class="group-label">Párrafo</span>
+        <div class="group-buttons">
+          <button class="ribbon-btn" class:is-active={active.h1} title="Título 1" onclick={() => run(() => editor.chain().focus().toggleHeading({ level: 1 }).run())}>
+            <span class="ribbon-icon">H1</span><span class="ribbon-label">Título 1</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.h2} title="Título 2" onclick={() => run(() => editor.chain().focus().toggleHeading({ level: 2 }).run())}>
+            <span class="ribbon-icon">H2</span><span class="ribbon-label">Título 2</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.h3} title="Título 3" onclick={() => run(() => editor.chain().focus().toggleHeading({ level: 3 }).run())}>
+            <span class="ribbon-icon">H3</span><span class="ribbon-label">Título 3</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.bulletList} title="Lista con viñetas" onclick={() => run(() => editor.chain().focus().toggleBulletList().run())}>
+            <span class="ribbon-icon">•</span><span class="ribbon-label">Viñetas</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.orderedList} title="Lista numerada" onclick={() => run(() => editor.chain().focus().toggleOrderedList().run())}>
+            <span class="ribbon-icon">1.</span><span class="ribbon-label">Numerada</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.blockquote} title="Cita" onclick={() => run(() => editor.chain().focus().toggleBlockquote().run())}>
+            <span class="ribbon-icon">❝</span><span class="ribbon-label">Cita</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.codeBlock} title="Bloque de código" onclick={() => run(() => editor.chain().focus().toggleCodeBlock().run())}>
+            <span class="ribbon-icon">{"{ }"}</span><span class="ribbon-label">Código bloque</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="ribbon-group">
+        <span class="group-label">Edición</span>
+        <div class="group-buttons">
+          <button class="ribbon-btn" class:is-active={findOpen} title="Buscar y reemplazar (Cmd/Ctrl+F)" onclick={() => { findOpen = !findOpen; queueMicrotask(() => findInput?.focus()); }}>
+            <span class="ribbon-icon">🔍</span><span class="ribbon-label">Buscar</span>
+          </button>
+          <button class="ribbon-btn" title="Deshacer (Cmd/Ctrl+Z)" onclick={() => run(() => editor.chain().focus().undo().run())}>
+            <span class="ribbon-icon">↶</span><span class="ribbon-label">Deshacer</span>
+          </button>
+          <button class="ribbon-btn" title="Rehacer" onclick={() => run(() => editor.chain().focus().redo().run())}>
+            <span class="ribbon-icon">↷</span><span class="ribbon-label">Rehacer</span>
+          </button>
+        </div>
+      </div>
+    {:else}
+      <div class="ribbon-group">
+        <span class="group-label">Contenido</span>
+        <div class="group-buttons">
+          <button class="ribbon-btn" title="Insertar tabla" onclick={insertTable}>
+            <span class="ribbon-icon">▦</span><span class="ribbon-label">Tabla</span>
+          </button>
+          <button class="ribbon-btn" title="Insertar imagen" onclick={insertImage}>
+            <span class="ribbon-icon">🖼</span><span class="ribbon-label">Imagen</span>
+          </button>
+          <button class="ribbon-btn" class:is-active={active.link} title="Enlace" onclick={toggleLink}>
+            <span class="ribbon-icon">🔗</span><span class="ribbon-label">Enlace</span>
+          </button>
+          <button class="ribbon-btn" title="Línea horizontal" onclick={() => run(() => editor.chain().focus().setHorizontalRule().run())}>
+            <span class="ribbon-icon">—</span><span class="ribbon-label">Línea</span>
+          </button>
+        </div>
+        {#if linkOpen}
+          <div class="link-pop">
+            <input
+              class="input"
+              bind:this={linkInput}
+              bind:value={linkUrl}
+              placeholder="https://…"
+              onkeydown={(e) => {
+                if (e.key === "Enter") applyLink();
+                if (e.key === "Escape") (linkOpen = false);
+              }}
+            />
+            <button class="btn btn-primary" onclick={applyLink}>Aplicar</button>
+          </div>
+        {/if}
+      </div>
+
+      {#if active.image}
+        <div class="ribbon-group">
+          <span class="group-label">Imagen</span>
+          <div class="group-buttons">
+            <label class="ribbon-field">
+              <span class="group-label">Ancho (px)</span>
+              <input
+                class="find-input"
+                type="number"
+                min="10"
+                bind:value={imageWidth}
+                placeholder="Auto"
+                onchange={applyImageWidth}
+              />
+            </label>
+          </div>
+        </div>
+      {/if}
+    {/if}
+  </div>
+</div>
 
   {#if findOpen}
     <div class="find-bar">
@@ -281,25 +414,108 @@
     min-width: 0;
   }
 
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 8px 12px;
+  .ribbon {
     border-bottom: 1px solid var(--border);
     background: var(--bg-elevated);
+  }
+
+  .ribbon-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 4px 10px 0;
+  }
+
+  .ribbon-tab {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  }
+
+  .ribbon-tab.active {
+    color: var(--text);
+    font-weight: 600;
+    background: var(--bg);
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  .ribbon-panel {
+    display: flex;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 6px 10px 8px;
     flex-wrap: wrap;
   }
 
-  .divider {
-    width: 1px;
-    height: 20px;
-    background: var(--border);
-    margin: 0 6px;
+  .ribbon-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 10px;
+    border-right: 1px solid var(--border);
   }
 
-  .spacer {
-    flex: 1;
+  .ribbon-group:last-child {
+    border-right: none;
+  }
+
+  .group-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-faint);
+  }
+
+  .group-buttons {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+  }
+
+  .ribbon-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 46px;
+    padding: 4px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .ribbon-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border);
+  }
+
+  .ribbon-btn.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+
+  .ribbon-icon {
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  .ribbon-label {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  .ribbon-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .find-bar {
@@ -326,7 +542,7 @@
     display: flex;
     gap: 6px;
     align-items: center;
-    margin-left: 6px;
+    margin-top: 6px;
   }
 
   .link-pop .input {
@@ -420,6 +636,54 @@
     border-top: 1px solid var(--border);
     margin: 2em auto;
     width: 40%;
+  }
+
+  :global(.surface .ProseMirror table) {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+    table-layout: fixed;
+    overflow: hidden;
+  }
+
+  :global(.surface .ProseMirror th),
+  :global(.surface .ProseMirror td) {
+    border: 1px solid var(--border);
+    padding: 0.45em 0.7em;
+    text-align: left;
+    vertical-align: top;
+    position: relative;
+  }
+
+  :global(.surface .ProseMirror th) {
+    background: var(--bg-sidebar);
+    font-weight: 600;
+  }
+
+  :global(.surface .ProseMirror .selectedCell) {
+    background: var(--accent-soft);
+  }
+
+  :global(.surface .ProseMirror img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    margin: 0.5em 0;
+  }
+
+  :global(.surface .ProseMirror img.ProseMirror-selectednode) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  :global(.surface .ProseMirror .column-resize-handle) {
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--accent);
+    pointer-events: none;
   }
 
   :global(.surface .ProseMirror p.is-editor-empty:first-child::before) {

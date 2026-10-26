@@ -63,13 +63,21 @@ pub fn create_project(
     app: tauri::AppHandle,
     db: State<'_, Db>,
     title: String,
+    author: Option<String>,
     goal: Option<i64>,
     description: Option<String>,
     cover_path: Option<String>,
 ) -> Result<Project> {
     let cover = persist_cover(&app, cover_path.as_deref())?;
     let conn = lock(&db)?;
-    repo::create_project(&conn, &title, goal.unwrap_or(3000), description, cover)
+    repo::create_project(
+        &conn,
+        &title,
+        author,
+        goal.unwrap_or(3000),
+        description,
+        cover,
+    )
 }
 
 #[tauri::command]
@@ -99,6 +107,17 @@ pub fn update_project_levels(
 ) -> Result<Project> {
     let conn = lock(&db)?;
     repo::update_project_levels(&conn, &id, &level1_name, &level2_name)
+}
+
+#[tauri::command]
+pub fn update_project_meta(
+    db: State<'_, Db>,
+    id: String,
+    author: Option<String>,
+    description: Option<String>,
+) -> Result<Project> {
+    let conn = lock(&db)?;
+    repo::update_project_meta(&conn, &id, author, description)
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +221,7 @@ pub fn import_file_as_project(
     app: tauri::AppHandle,
     db: State<'_, Db>,
     path: String,
+    author: Option<String>,
     goal: Option<i64>,
     description: Option<String>,
     cover_path: Option<String>,
@@ -218,7 +238,14 @@ pub fn import_file_as_project(
     let manuscript = parser::parse(&markdown);
 
     let mut guard = lock(&db)?;
-    let project = repo::create_project(&guard, title, goal.unwrap_or(3000), description, cover)?;
+    let project = repo::create_project(
+        &guard,
+        title,
+        author,
+        goal.unwrap_or(3000),
+        description,
+        cover,
+    )?;
     repo::import_manuscript(&mut *guard, &project.id, &manuscript)?;
     Ok(project)
 }
@@ -302,12 +329,13 @@ pub fn export_project(
     let project = repo::get_project(&conn, &project_id)?
         .ok_or_else(|| AppError::NotFound(format!("proyecto {project_id}")))?;
     let content = repo::get_project_content(&conn, &project_id)?;
-    export::export(
-        &project.title,
-        &content,
-        format,
-        std::path::Path::new(&path),
-    )
+    let meta = export::ExportMeta {
+        title: project.title,
+        author: project.author,
+        description: project.description,
+        cover_path: project.cover_path,
+    };
+    export::export(&meta, &content, format, std::path::Path::new(&path))
 }
 
 // ---------------------------------------------------------------------------
@@ -588,7 +616,8 @@ pub fn enrich_project(
     model: Option<String>,
 ) -> Result<Vec<Character>> {
     let settings = crate::settings::load(&settings_path(&app)?);
-    let backend = llm::resolve_backend(&settings, model.as_deref(), llm::DEFAULT_MODEL);
+    let model_override = model.as_deref().or(settings.llm_model.as_deref());
+    let backend = llm::resolve_backend(&settings, model_override, llm::DEFAULT_MODEL);
     let conn = lock(&db)?;
     let content = repo::get_project_content(&conn, &project_id)?;
     let texts: Vec<String> = content
@@ -811,6 +840,23 @@ fn persist_cover(app: &tauri::AppHandle, source: Option<&str>) -> Result<Option<
     Ok(Some(dest.to_string_lossy().into_owned()))
 }
 
+/// Copia una imagen insertada en el editor al directorio de datos de la app y
+/// devuelve la ruta persistida (para referenciarla en Markdown como `![](ruta)`).
+#[tauri::command]
+pub fn persist_image(app: tauri::AppHandle, source: String) -> Result<String> {
+    let source = std::path::Path::new(&source);
+    if !source.is_file() {
+        return Err(AppError::Validation("la imagen no existe".into()));
+    }
+    let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let dir = data_dir(&app)?.join("images");
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+    std::fs::copy(source, &dest)
+        .map_err(|e| AppError::Internal(format!("no se pudo copiar la imagen: {e}")))?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(data_dir(app)?.join(crate::settings::SETTINGS_FILE))
 }
@@ -830,16 +876,30 @@ pub struct IaStatus {
     pub gliner_cached: bool,
     pub onnxruntime_available: bool,
     pub ollama_available: bool,
+    pub cloud_key_set: bool,
 }
 
 #[tauri::command]
 pub fn ia_status(app: tauri::AppHandle) -> Result<IaStatus> {
-    let settings = crate::settings::load(&settings_path(&app)?);
+    let path = settings_path(&app)?;
+    let mut settings = crate::settings::load(&path);
+
+    // Migración: si una versión anterior guardó la API key en texto plano,
+    // muévela al llavero y elimínala del archivo de configuración.
+    if let Some(key) = settings.cloud_api_key.as_deref().map(str::trim) {
+        if !key.is_empty() {
+            crate::secrets::set_cloud_api_key(key)?;
+            settings.cloud_api_key = None;
+            crate::settings::save(&path, &settings)?;
+        }
+    }
+
     Ok(IaStatus {
         embeddings_cached: crate::engines::is_embeddings_cached(&embedder_cache_dir(&app)?),
         gliner_cached: crate::engines::is_gliner_cached(&gliner_cache_dir(&app)?),
         onnxruntime_available: crate::runtime::is_available(&data_dir(&app)?),
         ollama_available: ollama_available(),
+        cloud_key_set: crate::secrets::has_cloud_api_key(),
         settings,
     })
 }
@@ -849,6 +909,36 @@ pub fn ia_set_settings(app: tauri::AppHandle, settings: IaSettings) -> Result<Ia
     let path = settings_path(&app)?;
     crate::settings::save(&path, &settings)?;
     Ok(settings)
+}
+
+/// Guarda (o borra) la API key de la nube en el llavero del SO. Devuelve si
+/// queda una clave configurada.
+#[tauri::command]
+pub fn ia_set_cloud_key(key: Option<String>) -> Result<bool> {
+    match key.as_deref().map(str::trim) {
+        Some(k) if !k.is_empty() => crate::secrets::set_cloud_api_key(k)?,
+        _ => crate::secrets::delete_cloud_api_key()?,
+    }
+    Ok(crate::secrets::has_cloud_api_key())
+}
+
+#[tauri::command]
+pub fn ia_profiles() -> Vec<crate::profiles::ProfileInfo> {
+    crate::profiles::profiles()
+}
+
+#[tauri::command]
+pub fn ia_apply_profile(app: tauri::AppHandle, profile: String) -> Result<IaSettings> {
+    let path = settings_path(&app)?;
+    let mut settings = crate::settings::load(&path);
+    crate::profiles::apply_profile(&mut settings, &profile)?;
+    crate::settings::save(&path, &settings)?;
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn ia_cloud_providers() -> Vec<crate::llm::CloudProviderInfo> {
+    crate::llm::cloud_providers()
 }
 
 #[tauri::command]

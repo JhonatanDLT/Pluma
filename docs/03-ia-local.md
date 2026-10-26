@@ -210,10 +210,40 @@ strsim = "0.11"              # similitud de cadenas (Levenshtein/Jaro)
 ### IA en la nube (opt-in, activa por defecto)
 
 - Backend unificado en `llm.rs`: `Backend::Ollama` o `Backend::Cloud`.
-- **`resolve_backend`**: si hay una `cloud_api_key` configurada, se usa la nube; si no, Ollama.
-- Proveedores soportados: **OpenAI** (`/v1/chat/completions`) y **Anthropic** (`/v1/messages`), vía `ureq`.
-- Configuración: `cloud_provider`, `cloud_api_key`, `cloud_model` en `IaSettings` (UI en Ajustes → IA).
-- **Nota de seguridad**: la API key se guarda en texto plano (deuda técnica, ver `docs/08`).
+- **`resolve_backend`**: si hay una API key en el llavero, se usa la nube; si no, Ollama.
+- **Almacenamiento seguro de la clave**: la API key se guarda cifrada en el **llavero del
+  sistema operativo** (`secrets.rs` vía `keyring`: Keychain en macOS, Credential Manager en
+  Windows, Secret Service/kernel keyring en Linux). **Nunca** se escribe en `ia_settings.json`.
+  - Comando `ia_set_cloud_key` para guardar/borrar la clave; `ia_status` expone `cloud_key_set`
+    y migra automáticamente claves antiguas en texto plano al llavero.
+- Proveedores soportados (vía `ureq`, modo JSON donde el proveedor lo permite):
+  - **OpenAI-compatibles**: OpenAI, Groq, Mistral AI, DeepSeek, OpenRouter, xAI (Grok),
+    Together AI, Fireworks AI, Cohere (endpoint de compatibilidad) y Perplexity
+    (`POST /chat/completions` con `response_format: json_object`).
+  - **Anthropic** (`/v1/messages`).
+  - **Google Gemini** (`generateContent`, con `responseMimeType: application/json`).
+- La lista de proveedores (id, etiqueta y modelo por defecto) se expone vía el comando
+  `ia_cloud_providers` y se renderiza en la UI; al cambiar de proveedor se reinicia el
+  modelo al predeterminado de ese proveedor.
+- Configuración: `cloud_provider`, `cloud_model` en `IaSettings` (UI en Ajustes → IA). La
+  clave se gestiona aparte en el llavero.
+
+## 10. Perfiles de capacidad de equipo (2026)
+
+Presets de modelos locales que se aplican con un clic según el hardware del autor
+(`profiles.rs` + comandos `ia_profiles` / `ia_apply_profile`). La nube no se ve afectada.
+
+| Perfil | Pipeline de IA | RAM mín. | CPU mín. | Disco mín. | GPU |
+|--------|----------------|----------|----------|------------|-----|
+| **Modesto** | Reglas + estructura (sin descargas) | 1 GB | 2 núcleos | 50 MB | No |
+| **Medio** | GLiNER2 + embeddings + `qwen2.5:0.5b` | 3 GB | 4 núcleos | 2 GB | No |
+| **Alto** | GLiNER2 + embeddings + `qwen2.5:1.5b` | 5 GB | 4–8 núcleos | 3.5 GB | No (CPU ok) |
+| **Ultra alto** | Modelos 3B+ (`qwen2.5:3b`) + `keep_loaded` | 8 GB | 8 núcleos | 6 GB | Opcional (6 GB VRAM) |
+
+> Los requisitos son orientativos (pipeline de IA + app). La app base (Tauri + SQLite +
+> editor) requiere ~300–500 MB adicionales. Aplicar un perfil configura los nombres de
+> modelo; los pesos se descargan aparte y con permiso (Ollama para los LLM, botones de
+> instalación para GLiNER2/embeddings).
 
 ### Chat con contexto (RAG)
 

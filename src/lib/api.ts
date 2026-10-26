@@ -3,11 +3,13 @@ import type {
   AnalysisReport,
   Chapter,
   Character,
+  CloudProviderInfo,
   Entity,
   IaSettings,
   IaStatus,
   LanguageInfo,
   NavEntry,
+  ProfileInfo,
   Project,
   Relationship,
   Scene,
@@ -20,16 +22,22 @@ import type {
 export const listProjects = () => invoke<Project[]>("list_projects");
 export const createProject = (
   title: string,
+  author: string | null,
   goal: number | null,
   description: string | null,
   coverPath: string | null,
-) => invoke<Project>("create_project", { title, goal, description, coverPath });
+) => invoke<Project>("create_project", { title, author, goal, description, coverPath });
 export const renameProject = (id: string, title: string) =>
   invoke<Project>("rename_project", { id, title });
 export const deleteProject = (id: string) =>
   invoke<void>("delete_project", { id });
 export const updateProjectGoal = (id: string, goal: number) =>
   invoke<Project>("update_project_goal", { id, goal });
+export const updateProjectMeta = (
+  id: string,
+  author: string | null,
+  description: string | null,
+) => invoke<Project>("update_project_meta", { id, author, description });
 export const updateProjectLevels = (
   id: string,
   level1Name: string,
@@ -65,10 +73,11 @@ export const importFile = (projectId: string, path: string) =>
   invoke<Chapter[]>("import_file", { projectId, path });
 export const importFileAsProject = (
   path: string,
+  author: string | null,
   goal: number | null,
   description: string | null,
   coverPath: string | null,
-) => invoke<Project>("import_file_as_project", { path, goal, description, coverPath });
+) => invoke<Project>("import_file_as_project", { path, author, goal, description, coverPath });
 
 // Metadatos
 export const updateChapterMeta = (
@@ -160,6 +169,13 @@ export const iaStatus = () => invoke<IaStatus>("ia_status");
 export const iaSetSettings = (settings: IaSettings) =>
   invoke<IaSettings>("ia_set_settings", { settings });
 export const iaInstall = (engine: string) => invoke<void>("ia_install", { engine });
+export const iaCloudProviders = () =>
+  invoke<CloudProviderInfo[]>("ia_cloud_providers");
+export const iaSetCloudKey = (key: string | null) =>
+  invoke<boolean>("ia_set_cloud_key", { key });
+export const iaProfiles = () => invoke<ProfileInfo[]>("ia_profiles");
+export const iaApplyProfile = (profile: string) =>
+  invoke<IaSettings>("ia_apply_profile", { profile });
 
 // Texto a voz
 export const ttsSpeak = (text: string, voice: string | null, rate: number) =>

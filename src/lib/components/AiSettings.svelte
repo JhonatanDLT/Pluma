@@ -1,8 +1,11 @@
 <script lang="ts">
-  import type { IaStatus } from "$lib/types";
+  import type { CloudProviderInfo, IaStatus, ProfileInfo } from "$lib/types";
 
   let {
     iaStatus,
+    cloudProviders,
+    profiles,
+    onapplyprofile,
     oninstallonnxruntime,
     onupdatenerengine,
     oninstallgliner,
@@ -16,6 +19,9 @@
     onindexproject,
   }: {
     iaStatus: IaStatus | null;
+    cloudProviders: CloudProviderInfo[];
+    profiles: ProfileInfo[];
+    onapplyprofile: (profileId: string | null) => void;
     oninstallonnxruntime: () => void;
     onupdatenerengine: (engine: string) => void;
     oninstallgliner: () => void;
@@ -28,6 +34,14 @@
     onupdatecloudmodel: (model: string | null) => void;
     onindexproject: () => void;
   } = $props();
+
+  const selectedProvider = $derived(
+    cloudProviders.find((p) => p.id === iaStatus?.settings.cloud_provider) ??
+      null,
+  );
+  const selectedProfile = $derived(
+    profiles.find((p) => p.id === iaStatus?.settings.profile) ?? null,
+  );
 </script>
 
 <div class="ai-settings">
@@ -42,6 +56,27 @@
         </p>
         <button class="btn" onclick={oninstallonnxruntime}>Instalar runtime ONNX</button>
       </div>
+    {/if}
+
+    <label class="field">
+      <span>Perfil de capacidad</span>
+      <select
+        value={iaStatus.settings.profile ?? ""}
+        onchange={(e) => onapplyprofile(e.currentTarget.value || null)}
+      >
+        <option value="">Personalizado</option>
+        {#each profiles as profile (profile.id)}
+          <option value={profile.id}>{profile.label}</option>
+        {/each}
+      </select>
+    </label>
+
+    {#if selectedProfile}
+      <p class="ia-note">{selectedProfile.description}</p>
+      <p class="ia-note">
+        Requisitos mínimos: {selectedProfile.min_ram} de RAM · {selectedProfile.min_cpu} ·
+        {selectedProfile.min_disk} de disco · GPU: {selectedProfile.gpu}
+      </p>
     {/if}
 
     <label class="field">
@@ -105,8 +140,9 @@
           onchange={(e) => onupdatecloudprovider(e.currentTarget.value || null)}
         >
           <option value="">Desactivada</option>
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Anthropic</option>
+          {#each cloudProviders as provider (provider.id)}
+            <option value={provider.id}>{provider.label}</option>
+          {/each}
         </select>
       </label>
 
@@ -116,23 +152,27 @@
           <input
             type="password"
             class="input"
-            value={iaStatus.settings.cloud_api_key ?? ""}
-            placeholder="sk-…"
+            placeholder={iaStatus.cloud_key_set ? "•••••• (guardada en el llavero)" : "sk-…"}
             onchange={(e) => onupdatecloudapikey(e.currentTarget.value || null)}
           />
         </label>
+        {#if iaStatus.cloud_key_set}
+          <button class="btn" onclick={() => onupdatecloudapikey(null)}>
+            Borrar clave del llavero
+          </button>
+        {/if}
         <label class="field">
           <span>Modelo</span>
           <input
             class="input"
             value={iaStatus.settings.cloud_model ?? ""}
-            placeholder="gpt-4o-mini"
+            placeholder={selectedProvider?.default_model ?? "modelo"}
             onchange={(e) => onupdatecloudmodel(e.currentTarget.value || null)}
           />
         </label>
         <p class="ia-note">
-          La clave se guarda localmente en tu equipo. Al configurarla, la nube
-          queda activa por defecto.
+          La clave se guarda cifrada en el llavero del sistema operativo (no en
+          texto plano). Al configurarla, la nube queda activa por defecto.
         </p>
       {/if}
     </div>

@@ -8,9 +8,11 @@ mod llm;
 mod models;
 mod nlp;
 mod parser;
+mod profiles;
 mod rag;
 mod repo;
 mod runtime;
+mod secrets;
 mod settings;
 mod spell;
 mod structure;
@@ -53,6 +55,7 @@ pub fn run() {
             commands::delete_project,
             commands::update_project_goal,
             commands::update_project_levels,
+            commands::update_project_meta,
             commands::list_chapters,
             commands::create_chapter,
             commands::rename_chapter,
@@ -71,6 +74,7 @@ pub fn run() {
             commands::move_chapter,
             commands::move_scene,
             commands::export_project,
+            commands::persist_image,
             commands::list_characters,
             commands::list_relationships,
             commands::delete_character,
@@ -90,6 +94,10 @@ pub fn run() {
             commands::delete_snapshot,
             commands::ia_status,
             commands::ia_set_settings,
+            commands::ia_cloud_providers,
+            commands::ia_set_cloud_key,
+            commands::ia_profiles,
+            commands::ia_apply_profile,
             commands::ia_install,
             commands::tts_speak,
             commands::tts_stop,

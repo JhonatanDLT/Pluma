@@ -30,7 +30,9 @@ tauri-plugin-dialog = "2.8.3"
 pdf-extract = "0.12.1"
 pulldown-cmark = "0.13.5"
 docx-rs = "0.4.22"
-genpdf = "0.2.0"
+genpdf = { version = "0.2.0", features = ["images"] }
+image = "0.23"
+base64 = "0.22"
 strsim = "0.11.1"
 unicode-normalization = "0.1"
 zip = "9.0.5"
@@ -43,6 +45,7 @@ flate2 = "1"
 sha2 = "0.10"
 spellbook = "0.4"
 whatlang = "0.18"
+keyring = "3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

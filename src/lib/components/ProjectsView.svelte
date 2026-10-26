@@ -16,6 +16,7 @@
     onselectproject: (id: string) => void;
     oncreateproject: (
       title: string,
+      author: string | null,
       goal: number | null,
       description: string | null,
       coverPath: string | null,
@@ -23,6 +24,7 @@
     ondeleteproject: (id: string) => void;
     onimportproject: (
       path: string,
+      author: string | null,
       goal: number | null,
       description: string | null,
       coverPath: string | null,
@@ -36,6 +38,7 @@
   let formMode = $state<"create" | "import">("create");
   let importPath = $state<string | null>(null);
   let formName = $state("");
+  let formAuthor = $state("");
   let formGoal = $state("3000");
   let formSummary = $state("");
   let formCover = $state<string | null>(null);
@@ -54,6 +57,7 @@
     formMode = "create";
     importPath = null;
     formName = "";
+    formAuthor = "";
     formGoal = "3000";
     formSummary = "";
     formCover = null;
@@ -72,6 +76,7 @@
     formMode = "import";
     importPath = selected;
     formName = name;
+    formAuthor = "";
     formGoal = "3000";
     formSummary = "";
     formCover = null;
@@ -92,13 +97,14 @@
     const parsed = Number(formGoal);
     const goal = Number.isFinite(parsed) && parsed > 0 ? parsed : 3000;
     const summary = formSummary.trim() || null;
+    const author = formAuthor.trim() || null;
 
     if (formMode === "import" && importPath) {
-      onimportproject(importPath, goal, summary, formCover);
+      onimportproject(importPath, author, goal, summary, formCover);
     } else {
       const name = formName.trim();
       if (!name) return;
-      oncreateproject(name, goal, summary, formCover);
+      oncreateproject(name, author, goal, summary, formCover);
     }
     formOpen = false;
   }
@@ -169,6 +175,11 @@
             disabled={formMode === "import"}
             placeholder="Título de la novela"
           />
+        </label>
+
+        <label class="field">
+          <span>Autor (opcional)</span>
+          <input class="input" bind:value={formAuthor} placeholder="Nombre del autor" />
         </label>
 
         <label class="field">

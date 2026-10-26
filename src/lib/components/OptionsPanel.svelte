@@ -6,7 +6,9 @@
   import AppearanceSettings from "$lib/components/AppearanceSettings.svelte";
   import type {
     Chapter,
+    CloudProviderInfo,
     IaStatus,
+    ProfileInfo,
     Project,
     Scene,
     SnapshotMeta,
@@ -18,6 +20,7 @@
     project,
     onsavechapter,
     onsavescene,
+    onupdateprojectmeta,
     onupdatelevels,
     ollamaAvailable,
     onchat,
@@ -28,6 +31,9 @@
     ondeletesnapshot,
     onloadsnapshots,
     iaStatus,
+    cloudProviders,
+    profiles,
+    onapplyprofile,
     oninstallonnxruntime,
     onupdatenerengine,
     oninstallgliner,
@@ -52,6 +58,7 @@
       summary: string | null;
     }) => void;
     onupdatelevels: (level1Name: string, level2Name: string) => void;
+    onupdateprojectmeta: (author: string | null, description: string | null) => void;
     ollamaAvailable: boolean;
     onchat: (message: string) => Promise<string>;
     snapshots: SnapshotMeta[];
@@ -61,6 +68,9 @@
     ondeletesnapshot: (id: string) => void;
     onloadsnapshots: () => void;
     iaStatus: IaStatus | null;
+    cloudProviders: CloudProviderInfo[];
+    profiles: ProfileInfo[];
+    onapplyprofile: (profileId: string | null) => void;
     oninstallonnxruntime: () => void;
     onupdatenerengine: (engine: string) => void;
     oninstallgliner: () => void;
@@ -114,6 +124,8 @@
       <MetadataPanel
         {chapter}
         {scene}
+        {project}
+        {onupdateprojectmeta}
         onsavechapter={onsavechapter}
         onsavescene={onsavescene}
       />
@@ -152,6 +164,9 @@
           <h4>Inteligencia artificial</h4>
           <AiSettings
             {iaStatus}
+            {cloudProviders}
+            {profiles}
+            {onapplyprofile}
             {oninstallonnxruntime}
             {onupdatenerengine}
             {oninstallgliner}

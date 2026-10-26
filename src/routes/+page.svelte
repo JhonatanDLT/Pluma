@@ -11,16 +11,23 @@
   import QuickSwitcher from "$lib/components/QuickSwitcher.svelte";
   import * as api from "$lib/api";
   import { applyTheme, getTheme } from "$lib/theme";
+  import {
+    applyFontSettings,
+    getFontSettings,
+    registerCustomFonts,
+  } from "$lib/fonts";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { listen } from "@tauri-apps/api/event";
   import type {
     ChangeEntry,
     Chapter,
     Character,
+    CloudProviderInfo,
     EditorMode,
     Entity,
     IaStatus,
     NavEntry,
+    ProfileInfo,
     Project,
     Relationship,
     SaveState,
@@ -55,6 +62,8 @@
   let correcting = $state(false);
   let editorRevision = $state(0);
   let iaStatus = $state<IaStatus | null>(null);
+  let cloudProviders = $state<CloudProviderInfo[]>([]);
+  let profiles = $state<ProfileInfo[]>([]);
   let snapshots = $state<SnapshotMeta[]>([]);
   let snapshotBusy = $state(false);
   let navigation = $state<NavEntry[]>([]);
@@ -137,10 +146,14 @@
   onMount(async () => {
     await loadProjects();
     await loadIaStatus();
+    await loadCloudProviders();
+    await loadProfiles();
   });
 
   onMount(() => {
     applyTheme(getTheme());
+    applyFontSettings(getFontSettings());
+    registerCustomFonts();
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => {
       if (getTheme() === "system") applyTheme("system");
@@ -369,12 +382,13 @@
 
   async function createProject(
     title: string,
+    author: string | null,
     goal: number | null,
     description: string | null,
     coverPath: string | null,
   ) {
     try {
-      const project = await api.createProject(title, goal, description, coverPath);
+      const project = await api.createProject(title, author, goal, description, coverPath);
       projects = await api.listProjects();
       await selectProject(project.id);
     } catch (e) {
@@ -510,19 +524,30 @@
 
   async function importProject(
     path: string,
+    author: string | null,
     goal: number | null,
     description: string | null,
     coverPath: string | null,
   ) {
     try {
       importing = true;
-      const project = await api.importFileAsProject(path, goal, description, coverPath);
+      const project = await api.importFileAsProject(path, author, goal, description, coverPath);
       projects = await api.listProjects();
       await selectProject(project.id);
     } catch (e) {
       reportError(e);
     } finally {
       importing = false;
+    }
+  }
+
+  async function updateProjectMeta(author: string | null, description: string | null) {
+    if (!selectedProjectId) return;
+    try {
+      const updated = await api.updateProjectMeta(selectedProjectId, author, description);
+      projects = projects.map((p) => (p.id === updated.id ? updated : p));
+    } catch (e) {
+      reportError(e);
     }
   }
 
@@ -722,6 +747,39 @@
     }
   }
 
+  async function loadCloudProviders() {
+    try {
+      cloudProviders = await api.iaCloudProviders();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function loadProfiles() {
+    try {
+      profiles = await api.iaProfiles();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function applyProfile(profileId: string | null) {
+    if (!iaStatus) return;
+    try {
+      if (!profileId) {
+        // "Personalizado": solo marca como custom sin tocar los modelos.
+        const settings = { ...iaStatus.settings, profile: null };
+        const saved = await api.iaSetSettings(settings);
+        iaStatus = { ...iaStatus, settings: saved };
+        return;
+      }
+      const saved = await api.iaApplyProfile(profileId);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
   async function chat(message: string): Promise<string> {
     return await api.chat(message, iaStatus?.settings.llm_model ?? null, selectedProjectId);
   }
@@ -743,7 +801,7 @@
   async function updateEmbeddings(enabled: boolean) {
     if (!iaStatus) return;
     try {
-      const settings = { ...iaStatus.settings, embeddings: enabled };
+      const settings = { ...iaStatus.settings, embeddings: enabled, profile: null };
       const saved = await api.iaSetSettings(settings);
       iaStatus = { ...iaStatus, settings: saved };
     } catch (e) {
@@ -781,7 +839,7 @@
   async function updateNerEngine(engine: string) {
     if (!iaStatus) return;
     try {
-      const settings = { ...iaStatus.settings, ner_engine: engine };
+      const settings = { ...iaStatus.settings, ner_engine: engine, profile: null };
       const saved = await api.iaSetSettings(settings);
       iaStatus = { ...iaStatus, settings: saved };
     } catch (e) {
@@ -792,7 +850,7 @@
   async function updateKeepLoaded(enabled: boolean) {
     if (!iaStatus) return;
     try {
-      const settings = { ...iaStatus.settings, keep_loaded: enabled };
+      const settings = { ...iaStatus.settings, keep_loaded: enabled, profile: null };
       const saved = await api.iaSetSettings(settings);
       iaStatus = { ...iaStatus, settings: saved };
     } catch (e) {
@@ -803,7 +861,7 @@
   async function updateRelationshipModel(model: string | null) {
     if (!iaStatus) return;
     try {
-      const settings = { ...iaStatus.settings, relationship_model: model };
+      const settings = { ...iaStatus.settings, relationship_model: model, profile: null };
       const saved = await api.iaSetSettings(settings);
       iaStatus = { ...iaStatus, settings: saved };
     } catch (e) {
@@ -814,7 +872,15 @@
   async function updateCloudProvider(provider: string | null) {
     if (!iaStatus) return;
     try {
-      const settings = { ...iaStatus.settings, cloud_provider: provider };
+      const prev = iaStatus.settings.cloud_provider;
+      const def =
+        cloudProviders.find((p) => p.id === provider)?.default_model ?? null;
+      // Al cambiar de proveedor se reinicia el modelo al predeterminado del nuevo.
+      const settings = {
+        ...iaStatus.settings,
+        cloud_provider: provider,
+        cloud_model: prev !== provider ? def : iaStatus.settings.cloud_model,
+      };
       const saved = await api.iaSetSettings(settings);
       iaStatus = { ...iaStatus, settings: saved };
     } catch (e) {
@@ -825,9 +891,8 @@
   async function updateCloudApiKey(key: string | null) {
     if (!iaStatus) return;
     try {
-      const settings = { ...iaStatus.settings, cloud_api_key: key };
-      const saved = await api.iaSetSettings(settings);
-      iaStatus = { ...iaStatus, settings: saved };
+      const cloudKeySet = await api.iaSetCloudKey(key);
+      iaStatus = { ...iaStatus, cloud_key_set: cloudKeySet };
     } catch (e) {
       reportError(e);
     }
@@ -1212,6 +1277,7 @@
             chapter={selectedChapter}
             scene={currentScene}
             project={selectedProject}
+            onupdateprojectmeta={updateProjectMeta}
             onsavechapter={saveChapterMeta}
             onsavescene={saveSceneMeta}
             onupdatelevels={updateProjectLevels}
@@ -1224,6 +1290,9 @@
             ondeletesnapshot={deleteSnapshot}
             onloadsnapshots={loadSnapshots}
             {iaStatus}
+            {cloudProviders}
+            {profiles}
+            onapplyprofile={applyProfile}
             oninstallonnxruntime={installOnnxRuntime}
             onupdatenerengine={updateNerEngine}
             oninstallgliner={installGliner}

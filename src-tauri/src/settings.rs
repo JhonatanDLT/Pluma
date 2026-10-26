@@ -20,15 +20,21 @@ pub struct IaSettings {
     pub llm_model: Option<String>,
     /// Modelo LLM para tipar relaciones (`None` = desactivado).
     pub relationship_model: Option<String>,
-    /// Proveedor de IA en la nube (`openai` / `anthropic`).
+    /// Proveedor de IA en la nube (`openai`, `anthropic`, `gemini`, `groq`, `mistral`, …).
     pub cloud_provider: Option<String>,
-    /// API key en la nube. Si está presente, la nube queda **activa por defecto**.
+    /// API key en la nube. **No se persiste en disco**: se guarda cifrada en el
+    /// llavero del sistema operativo (ver `secrets`). Solo se deserializa para
+    /// migrar claves antiguas en texto plano.
+    #[serde(skip_serializing)]
     pub cloud_api_key: Option<String>,
     /// Modelo en la nube.
     pub cloud_model: Option<String>,
     /// Perfil de alto rendimiento: mantener los modelos cargados en memoria entre
     /// análisis. `false` (por defecto) = cargar y liberar en cada uso (mínimo consumo).
     pub keep_loaded: bool,
+    /// Perfil de capacidad de equipo (`modesto`, `medio`, `alto`, `ultra`). `None`
+    /// significa configuración personalizada.
+    pub profile: Option<String>,
 }
 
 impl Default for IaSettings {
@@ -42,6 +48,7 @@ impl Default for IaSettings {
             cloud_api_key: None,
             cloud_model: None,
             keep_loaded: false,
+            profile: None,
         }
     }
 }

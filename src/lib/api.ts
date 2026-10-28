@@ -177,6 +177,9 @@ export const iaProfiles = () => invoke<ProfileInfo[]>("ia_profiles");
 export const iaApplyProfile = (profile: string) =>
   invoke<IaSettings>("ia_apply_profile", { profile });
 
+// Copias de seguridad
+export const backupDatabase = () => invoke<string>("backup_database");
+
 // Texto a voz
 export const ttsSpeak = (text: string, voice: string | null, rate: number) =>
   invoke<void>("tts_speak", { text, voice, rate });

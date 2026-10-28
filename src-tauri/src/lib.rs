@@ -37,14 +37,18 @@ fn resolve_data_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = resolve_data_dir(app.handle())?;
             // Prepara el runtime de ONNX Runtime (fija ORT_DYLIB_PATH si ya está
             // instalado) antes de que ningún motor pesado intente cargarse.
             crate::runtime::prepare(&dir);
-            app.manage(db::Db::open(&dir.join("pluma.db"))?);
+            let db = db::Db::open(&dir.join("pluma.db"))?;
+            // Copia automática diaria antes de que el usuario empiece a escribir.
+            if let Ok(conn) = db.conn.lock() {
+                let _ = crate::commands::maybe_auto_backup(&conn, &dir);
+            }
+            app.manage(db);
             app.manage(crate::engines::ModelCache::new());
             Ok(())
         })
@@ -74,6 +78,7 @@ pub fn run() {
             commands::move_chapter,
             commands::move_scene,
             commands::export_project,
+            commands::backup_database,
             commands::persist_image,
             commands::list_characters,
             commands::list_relationships,

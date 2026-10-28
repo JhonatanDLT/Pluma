@@ -1,5 +1,6 @@
 import { marked } from "marked";
 import TurndownService from "turndown";
+import DOMPurify from "dompurify";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 const turndown = new TurndownService({
@@ -54,7 +55,14 @@ turndown.addRule("image", {
 
 /** Markdown → HTML (para cargar contenido en el editor WYSIWYG). */
 export function markdownToHtml(markdown: string): string {
-  const html = marked.parse(markdown, { async: false }) as string;
+  const raw = marked.parse(markdown, { async: false }) as string;
+  // El manuscrito puede venir de archivos externos: nunca inyectamos HTML
+  // crudo en el DOM sin sanitizar. `data-path` se conserva para las imágenes
+  // locales que se resuelven vía `asset://`.
+  const html = DOMPurify.sanitize(raw, {
+    USE_PROFILES: { html: true },
+    ADD_ATTR: ["data-path", "width", "height"],
+  });
   // Convierte rutas locales de imagen a URLs de asset y añade `data-path`.
   return html.replace(
     /<img\b([^>]*?)\bsrc="([^"]+)"/g,

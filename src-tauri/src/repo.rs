@@ -1,6 +1,20 @@
+use std::collections::HashMap;
+
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
+use unicode_normalization::UnicodeNormalization;
+
+/// Clave de comparación de nombres: sin tildes, minúsculas y sin espacios
+/// sobrantes. Se usa para fusionar entidades entre análisis sin duplicarlas.
+pub fn normalize_key(s: &str) -> String {
+    s.nfd()
+        .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
+        .collect::<String>()
+        .to_lowercase()
+        .trim()
+        .to_string()
+}
 
 use crate::error::{AppError, Result};
 use crate::models::{
@@ -553,6 +567,7 @@ pub fn list_characters(conn: &Connection, project_id: &str) -> Result<Vec<Charac
     Ok(characters)
 }
 
+#[allow(dead_code)] // Se conserva para futuras operaciones de reemplazo explícitas.
 pub fn replace_characters(
     conn: &mut Connection,
     project_id: &str,
@@ -583,6 +598,101 @@ pub fn replace_characters(
                 c.updated_at
             ],
         )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Fusiona los personajes detectados con los existentes.
+///
+/// Reglas:
+/// - Empareja por nombre o alias normalizado.
+/// - Conserva el `id`, `created_at` y todos los campos editados manualmente.
+/// - Solo rellena campos que estén vacíos.
+/// - No elimina personajes que no aparezcan en el nuevo análisis
+///   («stale-not-delete»), de modo que analizar un capítulo no borra la biblia
+///   construida con los anteriores.
+pub fn merge_characters(
+    conn: &mut Connection,
+    project_id: &str,
+    incoming: &[Character],
+) -> Result<()> {
+    let existing = list_characters(conn, project_id)?;
+    let mut by_key: HashMap<String, usize> = HashMap::new();
+    for (i, c) in existing.iter().enumerate() {
+        by_key.entry(normalize_key(&c.name)).or_insert(i);
+        for alias in &c.aliases {
+            by_key.entry(normalize_key(alias)).or_insert(i);
+        }
+    }
+
+    let tx = conn.transaction()?;
+    for new in incoming {
+        let key = normalize_key(&new.name);
+        if let Some(&idx) = by_key.get(&key) {
+            let old = &existing[idx];
+            let mut aliases = old.aliases.clone();
+            for a in &new.aliases {
+                let ak = normalize_key(a);
+                if !ak.is_empty()
+                    && !aliases.iter().any(|x| normalize_key(x) == ak)
+                    && normalize_key(&old.name) != ak
+                {
+                    aliases.push(a.clone());
+                }
+            }
+            let role = old.role.clone().or_else(|| new.role.clone());
+            let description = old.description.clone().or_else(|| new.description.clone());
+            let biography = old.biography.clone().or_else(|| new.biography.clone());
+            let traits = if old.traits.is_empty() {
+                new.traits.clone()
+            } else {
+                old.traits.clone()
+            };
+            let goals = if old.goals.is_empty() {
+                new.goals.clone()
+            } else {
+                old.goals.clone()
+            };
+            let arc = old.arc.clone().or_else(|| new.arc.clone());
+            tx.execute(
+                "UPDATE character SET aliases_json = ?1, role = ?2, description = ?3,
+                 biography = ?4, traits_json = ?5, goals_json = ?6, arc = ?7,
+                 updated_at = ?8 WHERE id = ?9",
+                params![
+                    json(aliases),
+                    role,
+                    description,
+                    biography,
+                    json(traits),
+                    json(goals),
+                    arc,
+                    Utc::now().to_rfc3339(),
+                    old.id
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO character (id, project_id, name, aliases_json, role, description,
+                 biography, traits_json, goals_json, arc, color, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    new.id,
+                    new.project_id,
+                    new.name,
+                    json(new.aliases.clone()),
+                    new.role,
+                    new.description,
+                    new.biography,
+                    json(new.traits.clone()),
+                    json(new.goals.clone()),
+                    new.arc,
+                    new.color,
+                    new.created_at,
+                    new.updated_at
+                ],
+            )?;
+        }
     }
     tx.commit()?;
     Ok(())
@@ -638,6 +748,7 @@ pub fn list_relationships(conn: &Connection, project_id: &str) -> Result<Vec<Rel
     Ok(relationships)
 }
 
+#[allow(dead_code)] // Se conserva para futuras operaciones de reemplazo explícitas.
 pub fn replace_relationships(
     conn: &mut Connection,
     project_id: &str,
@@ -659,6 +770,50 @@ pub fn replace_relationships(
     Ok(())
 }
 
+/// Fusiona relaciones conservando el `id` y el `kind` editado manualmente.
+/// No elimina relaciones ausentes en el nuevo análisis.
+pub fn merge_relationships(
+    conn: &mut Connection,
+    project_id: &str,
+    incoming: &[Relationship],
+) -> Result<()> {
+    let existing = list_relationships(conn, project_id)?;
+    let tx = conn.transaction()?;
+    for new in incoming {
+        let found = existing.iter().find(|r| {
+            (r.character_a_id == new.character_a_id && r.character_b_id == new.character_b_id)
+                || (r.character_a_id == new.character_b_id
+                    && r.character_b_id == new.character_a_id)
+        });
+        if let Some(old) = found {
+            let kind = old.kind.clone().or_else(|| new.kind.clone());
+            let intensity = old.intensity.max(new.intensity);
+            let description = old.description.clone().or_else(|| new.description.clone());
+            tx.execute(
+                "UPDATE relationship SET kind = ?1, intensity = ?2, description = ?3 WHERE id = ?4",
+                params![kind, intensity, description, old.id],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO relationship (id, project_id, character_a_id, character_b_id,
+                 kind, intensity, description)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    new.id,
+                    new.project_id,
+                    new.character_a_id,
+                    new.character_b_id,
+                    new.kind,
+                    new.intensity,
+                    new.description
+                ],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 // --------------------------------------------------------------------------
 // Entidades (lugares, facciones, …)
 // --------------------------------------------------------------------------
@@ -674,6 +829,7 @@ pub fn list_entities(conn: &Connection, project_id: &str) -> Result<Vec<Entity>>
     Ok(entities)
 }
 
+#[allow(dead_code)] // Se conserva para futuras operaciones de reemplazo explícitas.
 pub fn replace_entities(
     conn: &mut Connection,
     project_id: &str,
@@ -700,6 +856,68 @@ pub fn replace_entities(
                 e.updated_at
             ],
         )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Fusiona entidades (lugares, facciones…) por nombre y tipo normalizados.
+/// Conserva el `id` y la descripción editada manualmente, y no elimina las
+/// entidades que no aparezcan en el nuevo análisis.
+pub fn merge_entities(
+    conn: &mut Connection,
+    project_id: &str,
+    incoming: &[Entity],
+) -> Result<()> {
+    let existing = list_entities(conn, project_id)?;
+    let tx = conn.transaction()?;
+    for new in incoming {
+        let key = normalize_key(&new.name);
+        let found = existing
+            .iter()
+            .find(|e| normalize_key(&e.name) == key && e.entity_type == new.entity_type);
+        if let Some(old) = found {
+            let mut aliases = old.aliases.clone();
+            for a in &new.aliases {
+                let ak = normalize_key(a);
+                if !ak.is_empty()
+                    && !aliases.iter().any(|x| normalize_key(x) == ak)
+                    && normalize_key(&old.name) != ak
+                {
+                    aliases.push(a.clone());
+                }
+            }
+            let description = old.description.clone().or_else(|| new.description.clone());
+            let mentions = old.mention_count.max(new.mention_count);
+            tx.execute(
+                "UPDATE entity SET aliases_json = ?1, description = ?2, mention_count = ?3,
+                 updated_at = ?4 WHERE id = ?5",
+                params![
+                    json(aliases),
+                    description,
+                    mentions,
+                    Utc::now().to_rfc3339(),
+                    old.id
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO entity (id, project_id, name, entity_type, aliases_json,
+                 description, mention_count, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    new.id,
+                    new.project_id,
+                    new.name,
+                    new.entity_type,
+                    json(new.aliases.clone()),
+                    new.description,
+                    new.mention_count,
+                    new.created_at,
+                    new.updated_at
+                ],
+            )?;
+        }
     }
     tx.commit()?;
     Ok(())
@@ -1225,5 +1443,33 @@ mod tests {
             )
             .unwrap();
         assert_eq!(content, "hola");
+    }
+
+    #[test]
+    fn merge_characters_preserves_existing_id_and_profile() {
+        let mut conn = crate::db::test_connection();
+        let project = create_project(&conn, "Novela", None, 5000, None, None).unwrap();
+
+        let mut existing = Character::new(&project.id, "Elena");
+        existing.description = Some("Descripción editada".into());
+        let existing_id = existing.id.clone();
+        merge_characters(&mut conn, &project.id, &[existing]).unwrap();
+
+        // Un segundo análisis detecta «Élena» (con tilde) y un alias nuevo.
+        let mut incoming = Character::new(&project.id, "Élena");
+        incoming.aliases = vec!["la capitana".into()];
+        incoming.role = Some("protagonista".into());
+        merge_characters(&mut conn, &project.id, &[incoming]).unwrap();
+
+        let chars = list_characters(&conn, &project.id).unwrap();
+        assert_eq!(chars.len(), 1, "no debe duplicar por tildes");
+        assert_eq!(chars[0].id, existing_id, "debe conservar el ID");
+        assert_eq!(
+            chars[0].description.as_deref(),
+            Some("Descripción editada"),
+            "debe conservar la descripción editada"
+        );
+        assert_eq!(chars[0].role.as_deref(), Some("protagonista"));
+        assert!(chars[0].aliases.contains(&"la capitana".to_string()));
     }
 }

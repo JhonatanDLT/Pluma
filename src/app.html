@@ -5,20 +5,7 @@
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Pluma</title>
-    <script>
-      // Aplica el tema antes del primer render para evitar parpadeo.
-      (function () {
-        try {
-          var t = localStorage.getItem("pluma.theme");
-          var themes = ["light", "dark", "sepia", "paper"];
-          if (themes.indexOf(t) === -1) t = "system";
-          if (t === "system") {
-            t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-          }
-          document.documentElement.dataset.theme = t;
-        } catch (e) {}
-      })();
-    </script>
+    <script src="%sveltekit.assets%/theme-init.js"></script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import * as api from "$lib/api";
   import type { Project } from "$lib/types";
 
   let {
@@ -64,6 +65,15 @@
     formOpen = true;
   }
 
+  async function backup() {
+    try {
+      const path = await api.backupDatabase();
+      window.alert(`Copia de seguridad creada en:\n${path}`);
+    } catch (e) {
+      window.alert(`No se pudo crear la copia de seguridad: ${e}`);
+    }
+  }
+
   async function openImport() {
     const selected = await open({
       multiple: false,
@@ -121,6 +131,7 @@
     <div class="projects-head">
       <h2>Tus novelas</h2>
       <div class="head-actions">
+        <button class="btn" onclick={backup} title="Crear una copia de seguridad de la base de datos">Copia</button>
         <button class="btn" onclick={openImport} title="Importar un PDF, EPUB, DOCX o TXT como proyecto">Importar</button>
         <button class="btn btn-primary" onclick={openCreate}>＋ Nuevo proyecto</button>
       </div>

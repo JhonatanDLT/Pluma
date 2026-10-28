@@ -37,7 +37,9 @@ impl Db {
         })?;
 
         // Integridad referencial + modo WAL para lecturas/escrituras concurrentes rápidas.
-        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
+        )?;
 
         migrate(&mut conn)?;
 

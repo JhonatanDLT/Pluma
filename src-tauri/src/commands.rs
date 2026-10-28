@@ -35,6 +35,90 @@ fn lock_model<T>(m: &std::sync::Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>
         .map_err(|_| AppError::Internal("estado de modelos corrupto".into()))
 }
 
+/// Valida una ruta de importación: extensión permitida y tamaño máximo.
+///
+/// Sin esta comprobación, un renderer comprometido podría usar `import_file`
+/// para leer cualquier archivo del sistema (`~/.ssh/id_rsa`, `.env`, …) y
+/// exfiltrarlo. La validación se hace en Rust, no solo en el diálogo.
+fn validate_import_path(path: &std::path::Path) -> Result<()> {
+    if !path.is_file() {
+        return Err(AppError::Validation("el archivo no existe".into()));
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    const ALLOWED: &[&str] = &[
+        "md", "markdown", "txt", "pdf", "docx", "epub", "png", "jpg", "jpeg", "webp", "gif",
+        "bmp", "tif", "tiff",
+    ];
+    if !ALLOWED.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "extensión no permitida: .{ext}"
+        )));
+    }
+    let meta = std::fs::metadata(path)
+        .map_err(|e| AppError::Internal(format!("no se pudo leer el archivo: {e}")))?;
+    const MAX_IMPORT: u64 = 250 * 1024 * 1024;
+    if meta.len() > MAX_IMPORT {
+        return Err(AppError::Validation(
+            "el archivo supera el límite de 250 MB".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Valida una imagen de portada o del editor (extensión y tamaño).
+fn validate_image_path(path: &std::path::Path) -> Result<()> {
+    if !path.is_file() {
+        return Err(AppError::Validation("la imagen no existe".into()));
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    const ALLOWED: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff"];
+    if !ALLOWED.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "formato de imagen no permitido: .{ext}"
+        )));
+    }
+    let meta = std::fs::metadata(path)?;
+    const MAX_IMAGE: u64 = 25 * 1024 * 1024;
+    if meta.len() > MAX_IMAGE {
+        return Err(AppError::Validation(
+            "la imagen supera el límite de 25 MB".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Valida la ruta de exportación y que su extensión coincida con el formato.
+fn validate_export_path(path: &std::path::Path, format: &str) -> Result<()> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let allowed: &[&str] = match format {
+        "md" => &["md"],
+        "txt" => &["txt"],
+        "html" => &["html", "htm"],
+        "docx" => &["docx"],
+        "pdf" => &["pdf"],
+        "epub" => &["epub"],
+        _ => return Err(AppError::Validation(format!("formato desconocido: {format}"))),
+    };
+    if !allowed.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "la extensión .{ext} no corresponde al formato {format}"
+        )));
+    }
+    Ok(())
+}
+
 /// Huella SHA-256 de un conjunto de textos (para detectar cambios sin comparar
 /// el contenido completo).
 fn hash_texts(texts: &[String]) -> String {
@@ -208,7 +292,9 @@ pub fn import_markdown(
 /// extrayendo texto según su formato (extracción de PDF u OCR para imágenes).
 #[tauri::command]
 pub fn import_file(db: State<'_, Db>, project_id: String, path: String) -> Result<Vec<Chapter>> {
-    let markdown = extract::extract_markdown(std::path::Path::new(&path))?;
+    let path = std::path::Path::new(&path);
+    validate_import_path(path)?;
+    let markdown = extract::extract_markdown(path)?;
     let manuscript = parser::parse(&markdown);
     let mut guard = lock(&db)?;
     repo::import_manuscript(&mut *guard, &project_id, &manuscript)
@@ -227,6 +313,7 @@ pub fn import_file_as_project(
     cover_path: Option<String>,
 ) -> Result<Project> {
     let path = std::path::Path::new(&path);
+    validate_import_path(path)?;
     let title = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -314,6 +401,58 @@ pub fn move_scene(
 }
 
 // ---------------------------------------------------------------------------
+// Copias de seguridad
+// ---------------------------------------------------------------------------
+
+/// Crea una copia de seguridad consistente de la base de datos con
+/// `VACUUM INTO` (atómica y sin bloquear la lectura) en `app_data/backups/`.
+#[tauri::command]
+pub fn backup_database(app: tauri::AppHandle, db: State<'_, Db>) -> Result<String> {
+    let dir = data_dir(&app)?.join("backups");
+    std::fs::create_dir_all(&dir)?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let dest = dir.join(format!("pluma-{stamp}.db"));
+    let conn = lock(&db)?;
+    conn.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()])?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Copia automática diaria (como máximo una por día). Se invoca al arrancar.
+pub fn maybe_auto_backup(conn: &Connection, data_dir: &std::path::Path) -> Result<()> {
+    let backups = data_dir.join("backups");
+    std::fs::create_dir_all(&backups)?;
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let marker = backups.join(format!(".auto-{today}"));
+    if marker.exists() {
+        return Ok(());
+    }
+    let dest = backups.join(format!("auto-{today}.db"));
+    conn.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()])?;
+    std::fs::write(&marker, b"")?;
+    // Conserva como máximo las 14 copias automáticas más recientes.
+    if let Ok(entries) = std::fs::read_dir(&backups) {
+        let mut autos: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("auto-") && n.ends_with(".db"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        autos.sort();
+        while autos.len() > 14 {
+            if let Some(old) = autos.first() {
+                let _ = std::fs::remove_file(old);
+                autos.remove(0);
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Exportación
 // ---------------------------------------------------------------------------
 
@@ -324,6 +463,7 @@ pub fn export_project(
     format: String,
     path: String,
 ) -> Result<()> {
+    validate_export_path(std::path::Path::new(&path), &format)?;
     let format = export::ExportFormat::from_str(&format)?;
     let conn = lock(&db)?;
     let project = repo::get_project(&conn, &project_id)?
@@ -546,25 +686,49 @@ pub async fn analyze_project(
         }
     }
 
-    let mut characters: Vec<Character> = Vec::new();
+    let mut guard = lock(&db)?;
+
+    // 1. Fusionar personajes: conserva IDs, alias y perfiles editados.
+    let incoming_characters: Vec<Character> = result
+        .characters
+        .iter()
+        .map(|dc| {
+            let mut character = Character::new(&project_id, &dc.name);
+            character.role = Some(dc.role.clone());
+            character.aliases = dc.aliases.clone();
+            character.description = if dc.description.is_empty() {
+                None
+            } else {
+                Some(dc.description.clone())
+            };
+            character
+        })
+        .collect();
+    repo::merge_characters(&mut *guard, &project_id, &incoming_characters)?;
+
+    // 2. Mapear nombres y alias al ID definitivo (existente o nuevo).
+    let merged = repo::list_characters(&guard, &project_id)?;
     let mut name_to_id: HashMap<String, String> = HashMap::new();
-    for dc in &result.characters {
-        let mut character = Character::new(&project_id, &dc.name);
-        character.role = Some(dc.role.clone());
-        character.aliases = dc.aliases.clone();
-        character.description = if dc.description.is_empty() {
-            None
-        } else {
-            Some(dc.description.clone())
-        };
-        name_to_id.insert(dc.name.clone(), character.id.clone());
-        characters.push(character);
+    for c in &merged {
+        name_to_id.insert(repo::normalize_key(&c.name), c.id.clone());
+        for alias in &c.aliases {
+            name_to_id
+                .entry(repo::normalize_key(alias))
+                .or_insert_with(|| c.id.clone());
+        }
     }
 
-    let mut relationships: Vec<Relationship> = Vec::new();
-    for dr in &result.relationships {
-        if let (Some(a), Some(b)) = (name_to_id.get(&dr.a), name_to_id.get(&dr.b)) {
-            relationships.push(Relationship {
+    // 3. Construir y fusionar relaciones usando los IDs definitivos.
+    let relationships: Vec<Relationship> = result
+        .relationships
+        .iter()
+        .filter_map(|dr| {
+            let a = name_to_id.get(&repo::normalize_key(&dr.a))?;
+            let b = name_to_id.get(&repo::normalize_key(&dr.b))?;
+            if a == b {
+                return None;
+            }
+            Some(Relationship {
                 id: uuid::Uuid::new_v4().to_string(),
                 project_id: project_id.clone(),
                 character_a_id: a.clone(),
@@ -572,10 +736,12 @@ pub async fn analyze_project(
                 kind: dr.kind.clone(),
                 intensity: dr.cooccurrences as f64,
                 description: Some(format!("Aparecen juntos en {} escena(s)", dr.cooccurrences)),
-            });
-        }
-    }
+            })
+        })
+        .collect();
+    repo::merge_relationships(&mut *guard, &project_id, &relationships)?;
 
+    // 4. Fusionar entidades (lugares, facciones…).
     let entities: Vec<Entity> = result
         .entities
         .iter()
@@ -591,12 +757,17 @@ pub async fn analyze_project(
             entity
         })
         .collect();
+    repo::merge_entities(&mut *guard, &project_id, &entities)?;
 
-    let mut guard = lock(&db)?;
-    repo::replace_characters(&mut *guard, &project_id, &characters)?;
-    repo::replace_relationships(&mut *guard, &project_id, &relationships)?;
-    repo::replace_entities(&mut *guard, &project_id, &entities)?;
-    repo::set_project_fingerprint(&guard, &project_id, Some(&fingerprint))?;
+    // 5. La huella solo representa el proyecto completo; un análisis parcial de
+    //    capítulo no debe marcarlo como «sin cambios».
+    if chapter_id.is_none() {
+        repo::set_project_fingerprint(&guard, &project_id, Some(&fingerprint))?;
+    }
+
+    let characters = repo::list_characters(&guard, &project_id)?;
+    let relationships = repo::list_relationships(&guard, &project_id)?;
+    let entities = repo::list_entities(&guard, &project_id)?;
 
     emit_progress(&app, 1, 1, "completado");
 
@@ -618,17 +789,25 @@ pub fn enrich_project(
     let settings = crate::settings::load(&settings_path(&app)?);
     let model_override = model.as_deref().or(settings.llm_model.as_deref());
     let backend = llm::resolve_backend(&settings, model_override, llm::DEFAULT_MODEL);
-    let conn = lock(&db)?;
-    let content = repo::get_project_content(&conn, &project_id)?;
-    let texts: Vec<String> = content
-        .iter()
-        .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
-        .collect();
-    let characters = repo::list_characters(&conn, &project_id)?;
+
+    // Recoge los datos bajo el lock y libéralo antes de las llamadas de red.
+    // Así el autoguardado no se queda esperando a que termine el LLM.
+    let (texts, characters) = {
+        let conn = lock(&db)?;
+        let content = repo::get_project_content(&conn, &project_id)?;
+        let texts: Vec<String> = content
+            .iter()
+            .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
+            .collect();
+        let characters = repo::list_characters(&conn, &project_id)?;
+        (texts, characters)
+    };
 
     for c in &characters {
         let context = llm::context_for(&c.name, &texts);
         let profile = llm::describe_character(&backend, &c.name, &context)?;
+        // El lock se toma solo para persistir el perfil, no durante la red.
+        let conn = lock(&db)?;
         repo::update_character_profile(
             &conn,
             &c.id,
@@ -640,6 +819,7 @@ pub fn enrich_project(
         )?;
     }
 
+    let conn = lock(&db)?;
     repo::list_characters(&conn, &project_id)
 }
 
@@ -829,6 +1009,7 @@ fn persist_cover(app: &tauri::AppHandle, source: Option<&str>) -> Result<Option<
     if !source.is_file() {
         return Ok(None);
     }
+    validate_image_path(source)?;
 
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
     let dir = data_dir(app)?.join("covers");
@@ -845,9 +1026,7 @@ fn persist_cover(app: &tauri::AppHandle, source: Option<&str>) -> Result<Option<
 #[tauri::command]
 pub fn persist_image(app: tauri::AppHandle, source: String) -> Result<String> {
     let source = std::path::Path::new(&source);
-    if !source.is_file() {
-        return Err(AppError::Validation("la imagen no existe".into()));
-    }
+    validate_image_path(source)?;
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
     let dir = data_dir(&app)?.join("images");
     std::fs::create_dir_all(&dir)?;

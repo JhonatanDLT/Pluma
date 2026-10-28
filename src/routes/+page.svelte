@@ -18,6 +18,7 @@
   } from "$lib/fonts";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import type {
     ChangeEntry,
     Chapter,
@@ -171,9 +172,47 @@
     };
   });
 
+  // Flush de seguridad al cerrar la ventana: evita perder los últimos 600 ms
+  // de escritura del autoguardado.
+  onMount(() => {
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    let closing = false;
+    win.onCloseRequested(async (event) => {
+      if (closing) return;
+      closing = true;
+      event.preventDefault();
+      try {
+        await flushSave();
+      } finally {
+        await win.destroy();
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (saveState === "saving") {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      unlisten?.();
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  });
+
   onMount(() => {
     function onKey(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void flushSave().then(() => {
+          if (saveState !== "error") saveState = "saved";
+        });
+        return;
+      }
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (selectedProjectId) {
@@ -419,6 +458,13 @@
   }
 
   async function deleteProject(id: string) {
+    const project = projects.find((p) => p.id === id);
+    const title = project?.title ?? "este proyecto";
+    const answer = window.prompt(
+      `Para eliminar «${title}», escribe el título del proyecto:`,
+      "",
+    );
+    if (answer?.trim() !== title) return;
     try {
       await api.deleteProject(id);
       if (selectedProjectId === id) {
@@ -442,6 +488,14 @@
   }
 
   async function deleteChapter(id: string) {
+    const chapter = chapters.find((c) => c.id === id);
+    if (
+      !window.confirm(
+        `¿Eliminar el capítulo «${chapter?.title ?? "sin título"}» y todas sus escenas?`,
+      )
+    ) {
+      return;
+    }
     try {
       await api.deleteChapter(id);
       if (selectedChapterId === id) {
@@ -459,6 +513,10 @@
   }
 
   async function deleteScene(id: string) {
+    const scene = scenes.find((s) => s.id === id);
+    if (!window.confirm(`¿Eliminar la escena «${scene?.title ?? "sin título"}»?`)) {
+      return;
+    }
     try {
       await api.deleteScene(id);
       if (selectedSceneId === id) {
@@ -704,6 +762,7 @@
   }
 
   async function deleteCharacter(id: string) {
+    if (!window.confirm("¿Eliminar este personaje de la biblia?")) return;
     try {
       await api.deleteCharacter(id);
       if (selectedProjectId) {
@@ -716,6 +775,7 @@
   }
 
   async function deleteEntity(id: string) {
+    if (!window.confirm("¿Eliminar esta entidad de la biblia?")) return;
     try {
       await api.deleteEntity(id);
       if (selectedProjectId) {
@@ -1028,6 +1088,7 @@
   }
 
   async function deleteSnapshot(id: string) {
+    if (!window.confirm("¿Eliminar esta versión guardada?")) return;
     try {
       await api.deleteSnapshot(id);
       await loadSnapshots();
@@ -1056,13 +1117,20 @@
     }, 600);
   }
 
-  async function persistScene(id: string) {
+  async function persistScene(id: string, attempt = 0): Promise<boolean> {
     try {
       await api.saveScene(id, sceneContent);
-      saveState = "saved";
+      if (selectedSceneId === id) saveState = "saved";
+      return true;
     } catch (e) {
       console.error(e);
-      saveState = "error";
+      // Un reintento ante fallos transitorios (fichero bloqueado, etc.).
+      if (attempt < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return persistScene(id, attempt + 1);
+      }
+      if (selectedSceneId === id) saveState = "error";
+      return false;
     }
   }
 
@@ -1072,7 +1140,7 @@
       saveTimer = undefined;
     }
     const id = selectedSceneId;
-    if (id && saveState === "saving") {
+    if (id && (saveState === "saving" || saveState === "error")) {
       await persistScene(id);
     }
   }

@@ -633,7 +633,7 @@ mod tests {
         // sola entidad (no fragmentado en «Zhou» + «Mingrui»). La limpieza fina
         // (distinguir persona de lugar, «Klein Moretti» completo) la aporta
         // GLiNER2, no las reglas.
-        let text = include_str!("../../LOTM01.txt");
+        let text = include_str!("../../fixtures/sample_narrative.txt");
         let texts = vec![text.to_string()];
         let result = analyze::<crate::engines::FastEmbedder>(&texts, None);
 

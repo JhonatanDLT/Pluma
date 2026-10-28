@@ -197,7 +197,7 @@ mod tests {
     #[test]
     #[ignore = "requiere ONNX Runtime + modelo GLiNER2 (~1 GB)"]
     fn compare_rules_vs_gliner_on_lotm() {
-        let text = include_str!("../../LOTM01.txt");
+        let text = include_str!("../../fixtures/sample_narrative.txt");
         let texts = vec![text.to_string()];
 
         // --- Antes: reglas agnósticas (sin modelos) ---

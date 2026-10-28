@@ -752,7 +752,7 @@ mod tests {
         let backend = Backend::Ollama {
             model: "qwen2.5:1.5b".to_string(),
         };
-        let context = include_str!("../../LOTM01.txt");
+        let context = include_str!("../../fixtures/sample_narrative.txt");
         let pairs = vec![("Zhou Mingrui".to_string(), "Klein Moretti".to_string())];
         let typed = type_relationships(&backend, &pairs, context).expect("tipar relaciones");
         for (a, b, t) in &typed {

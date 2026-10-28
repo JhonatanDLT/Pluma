@@ -550,10 +550,10 @@ fn export_docx(meta: &ExportMeta, content: &[(Chapter, Vec<Scene>)], path: &Path
     if let Some(d) = &meta.description {
         doc = doc.add_paragraph(Paragraph::new().add_run(Run::new().add_text(d).size(20)));
     }
-    if let Some(cover) = &meta.cover_path {
-        if let Some(pic) = docx_image(cover, None, None) {
-            doc = doc.add_paragraph(Paragraph::new().add_run(Run::new().add_image(pic)));
-        }
+    if let Some(cover) = &meta.cover_path
+        && let Some(pic) = docx_image(cover, None, None)
+    {
+        doc = doc.add_paragraph(Paragraph::new().add_run(Run::new().add_image(pic)));
     }
 
     for (chapter, scenes) in content {
@@ -768,10 +768,10 @@ fn export_pdf(meta: &ExportMeta, content: &[(Chapter, Vec<Scene>)], path: &Path)
             Style::new().with_font_size(11),
         )));
     }
-    if let Some(cover) = &meta.cover_path {
-        if let Some(img) = pdf_image(cover, None) {
-            doc.push(img.with_alignment(Alignment::Center));
-        }
+    if let Some(cover) = &meta.cover_path
+        && let Some(img) = pdf_image(cover, None)
+    {
+        doc.push(img.with_alignment(Alignment::Center));
     }
 
     for (chapter, scenes) in content {
@@ -1357,30 +1357,33 @@ fn collect_image_paths(markdown: &str) -> Vec<String> {
     let bytes = markdown.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'!' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            if let Some(rel) = markdown[i + 2..].find("](") {
-                let inner = i + 2 + rel + 2;
-                if let Some(close) = markdown[inner..].find(')') {
-                    let path = markdown[inner..inner + close].trim().to_string();
-                    if is_local_path(&path) {
-                        paths.push(path);
-                    }
-                    i = inner + close + 1;
-                    continue;
+        if bytes[i] == b'!'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'['
+            && let Some(rel) = markdown[i + 2..].find("](")
+        {
+            let inner = i + 2 + rel + 2;
+            if let Some(close) = markdown[inner..].find(')') {
+                let path = markdown[inner..inner + close].trim().to_string();
+                if is_local_path(&path) {
+                    paths.push(path);
                 }
+                i = inner + close + 1;
+                continue;
             }
         }
-        if bytes[i] == b'<' && markdown[i..].starts_with("<img ") {
-            if let Some(rel) = markdown[i..].find("src=\"") {
-                let abs = i + rel + 5;
-                if let Some(close) = markdown[abs..].find('"') {
-                    let path = markdown[abs..abs + close].to_string();
-                    if is_local_path(&path) {
-                        paths.push(path);
-                    }
-                    i = abs + close + 1;
-                    continue;
+        if bytes[i] == b'<'
+            && markdown[i..].starts_with("<img ")
+            && let Some(rel) = markdown[i..].find("src=\"")
+        {
+            let abs = i + rel + 5;
+            if let Some(close) = markdown[abs..].find('"') {
+                let path = markdown[abs..abs + close].to_string();
+                if is_local_path(&path) {
+                    paths.push(path);
                 }
+                i = abs + close + 1;
+                continue;
             }
         }
         i += 1;

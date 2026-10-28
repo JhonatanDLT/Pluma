@@ -35,6 +35,7 @@ semántico.
 - **Edición sin remontar:** la corrección gramatical, el reemplazo ortográfico y
   la restauración de versiones actualizan el editor en su sitio, conservando el
   scroll y recolocando el cursor.
+- `cargo clippy -D warnings` en CI y limpieza de los avisos existentes.
 
 ### Corregido
 

@@ -143,12 +143,8 @@ fn starts_with_word<'a>(lower: &'a str, word: &str) -> Option<&'a str> {
     if lower == word {
         return Some("");
     }
-    lower.strip_prefix(word).and_then(|rest| {
-        if rest.starts_with(|c: char| c.is_whitespace() || c.is_ascii_punctuation() || c == ':') {
-            Some(rest)
-        } else {
-            None
-        }
+    lower.strip_prefix(word).filter(|&rest| {
+        rest.starts_with(|c: char| c.is_whitespace() || c.is_ascii_punctuation() || c == ':')
     })
 }
 

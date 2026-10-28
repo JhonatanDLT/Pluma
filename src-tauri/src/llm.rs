@@ -208,22 +208,22 @@ impl Backend {
 pub fn resolve_backend(settings: &IaSettings, model: Option<&str>, default_model: &str) -> Backend {
     // La nube solo se usa con consentimiento explícito y una clave guardada.
     // Por defecto todo el manuscrito se queda en el equipo.
-    if settings.cloud_ai_enabled {
-        if let Some(key) = crate::secrets::get_cloud_api_key() {
-            let provider = settings
-                .cloud_provider
-                .clone()
-                .unwrap_or_else(|| "openai".to_string());
-            let cloud_model = settings
-                .cloud_model
-                .clone()
-                .unwrap_or_else(|| default_model_for(&provider));
-            return Backend::Cloud {
-                provider,
-                api_key: key,
-                model: cloud_model,
-            };
-        }
+    if settings.cloud_ai_enabled
+        && let Some(key) = crate::secrets::get_cloud_api_key()
+    {
+        let provider = settings
+            .cloud_provider
+            .clone()
+            .unwrap_or_else(|| "openai".to_string());
+        let cloud_model = settings
+            .cloud_model
+            .clone()
+            .unwrap_or_else(|| default_model_for(&provider));
+        return Backend::Cloud {
+            provider,
+            api_key: key,
+            model: cloud_model,
+        };
     }
     Backend::Ollama {
         model: model.unwrap_or(default_model).to_string(),

@@ -50,15 +50,15 @@ pub fn run() {
                 let _ = window.set_focus();
                 let _ = window.unminimize();
             }
-            if let Some(state) = app.try_state::<OpenedFiles>() {
-                if let Ok(mut guard) = state.0.lock() {
-                    for arg in argv.into_iter().skip(1) {
-                        let path = std::path::Path::new(&arg);
-                        if path.is_file() {
-                            let path = path.to_string_lossy().into_owned();
-                            guard.push(path.clone());
-                            let _ = app.emit("open-file", vec![path]);
-                        }
+            if let Some(state) = app.try_state::<OpenedFiles>()
+                && let Ok(mut guard) = state.0.lock()
+            {
+                for arg in argv.into_iter().skip(1) {
+                    let path = std::path::Path::new(&arg);
+                    if path.is_file() {
+                        let path = path.to_string_lossy().into_owned();
+                        guard.push(path.clone());
+                        let _ = app.emit("open-file", vec![path]);
                     }
                 }
             }
@@ -178,16 +178,15 @@ pub fn run() {
         .run(|app, event| {
             #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
             {
-                if let tauri::RunEvent::Opened { urls } = event {
-                    if let Some(state) = app.try_state::<OpenedFiles>() {
-                        if let Ok(mut guard) = state.0.lock() {
-                            for url in urls {
-                                if let Ok(path) = url.to_file_path() {
-                                    let path = path.to_string_lossy().into_owned();
-                                    guard.push(path.clone());
-                                    let _ = app.emit("open-file", vec![path]);
-                                }
-                            }
+                if let tauri::RunEvent::Opened { urls } = event
+                    && let Some(state) = app.try_state::<OpenedFiles>()
+                    && let Ok(mut guard) = state.0.lock()
+                {
+                    for url in urls {
+                        if let Ok(path) = url.to_file_path() {
+                            let path = path.to_string_lossy().into_owned();
+                            guard.push(path.clone());
+                            let _ = app.emit("open-file", vec![path]);
                         }
                     }
                 }

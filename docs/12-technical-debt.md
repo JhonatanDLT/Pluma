@@ -142,13 +142,13 @@ criterio de aceptación.
 
 - Reemplazo ortográfico de una ocurrencia (TD-42). ✅
 - Single-instance (TD-05). ✅
-- `cargo fmt --check` en CI (TD-45). ✅ (clippy pendiente)
+- `cargo fmt --check` + `cargo clippy -D warnings` en CI (TD-45). ✅
 - Modal compartido con focus trap (TD-37). ✅
 - Restauración de backups como proyecto nuevo (TD-27). ✅
 - Logging estructurado (TD-04). ✅
 - Ignorar/añadir al diccionario (TD-43). ✅
 - Corrección IA sin remontar el editor (TD-41). ✅
-- `clippy -D warnings` y audit (TD-45, TD-46). Pendiente.
+- Audit de dependencias (TD-46). Pendiente.
 
 ### Sprint 7 — IA y distribución
 

@@ -118,10 +118,10 @@ fn append_content(
 
 /// Registra una línea en blanco (separación de párrafos) si ya hay contenido.
 fn append_blank(scene: &mut Option<ParsedScene>) {
-    if let Some(scene) = scene.as_mut() {
-        if !scene.content.is_empty() {
-            scene.content.push('\n');
-        }
+    if let Some(scene) = scene.as_mut()
+        && !scene.content.is_empty()
+    {
+        scene.content.push('\n');
     }
 }
 

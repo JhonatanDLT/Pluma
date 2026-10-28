@@ -50,10 +50,10 @@ pub fn retrieve<E: Embedder>(
 
     let mut texts = Vec::new();
     for (_, scene_id) in rank(&stored, &query_embedding).into_iter().take(top_k) {
-        if let Some(scene) = crate::repo::get_scene(conn, &scene_id)? {
-            if !scene.content_markdown.trim().is_empty() {
-                texts.push(scene.content_markdown);
-            }
+        if let Some(scene) = crate::repo::get_scene(conn, &scene_id)?
+            && !scene.content_markdown.trim().is_empty()
+        {
+            texts.push(scene.content_markdown);
         }
     }
     Ok(texts)

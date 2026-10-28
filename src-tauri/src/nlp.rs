@@ -200,7 +200,7 @@ fn build_report<E: Embedder + ?Sized>(
         });
     }
 
-    characters.sort_by(|a, b| b.mention_count.cmp(&a.mention_count));
+    characters.sort_by_key(|a| std::cmp::Reverse(a.mention_count));
     for (i, c) in characters.iter_mut().enumerate() {
         c.role = if i == 0 { "protagonista" } else { "secundario" }.to_string();
     }
@@ -239,7 +239,7 @@ fn build_report<E: Embedder + ?Sized>(
             });
         }
     }
-    relationships.sort_by(|a, b| b.cooccurrences.cmp(&a.cooccurrences));
+    relationships.sort_by_key(|a| std::cmp::Reverse(a.cooccurrences));
 
     (characters, relationships)
 }
@@ -286,7 +286,7 @@ fn build_entities(
         })
         .collect();
 
-    entities.sort_by(|a, b| b.mention_count.cmp(&a.mention_count));
+    entities.sort_by_key(|a| std::cmp::Reverse(a.mention_count));
     entities
 }
 
@@ -326,11 +326,9 @@ fn extract_candidates(text: &str) -> Vec<String> {
         if is_name_token {
             current.push(word);
         }
-        if !is_name_token || closes {
-            if !current.is_empty() {
-                result.push(current.join(" "));
-                current.clear();
-            }
+        if (!is_name_token || closes) && !current.is_empty() {
+            result.push(current.join(" "));
+            current.clear();
         }
 
         sentence_start = ends_sentence;
@@ -492,7 +490,7 @@ fn extract_description(names: &[String], texts: &[String]) -> String {
 }
 
 fn split_sentences(text: &str) -> Vec<&str> {
-    text.split(|c| matches!(c, '.' | '!' | '?'))
+    text.split(['.', '!', '?'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .collect()

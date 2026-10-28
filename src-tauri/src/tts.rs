@@ -52,11 +52,11 @@ pub fn speak(text: &str, voice: Option<&str>, rate: f32) -> Result<()> {
 /// Detiene la reproducción actual matando únicamente el proceso que lanzamos
 /// (no todos los procesos `say`/`espeak` del sistema).
 pub fn stop() -> Result<()> {
-    if let Ok(mut guard) = CURRENT.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+    if let Ok(mut guard) = CURRENT.lock()
+        && let Some(mut child) = guard.take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
     }
     Ok(())
 }
@@ -120,13 +120,13 @@ fn list_voices_platform() -> Result<Vec<VoiceInfo>> {
     let mut voices = Vec::new();
     for line in text.lines() {
         let mut parts = line.split_whitespace();
-        if let (Some(name), Some(locale)) = (parts.next(), parts.next()) {
-            if locale.contains('_') {
-                voices.push(VoiceInfo {
-                    name: name.to_string(),
-                    locale: locale.to_string(),
-                });
-            }
+        if let (Some(name), Some(locale)) = (parts.next(), parts.next())
+            && locale.contains('_')
+        {
+            voices.push(VoiceInfo {
+                name: name.to_string(),
+                locale: locale.to_string(),
+            });
         }
     }
     Ok(voices)

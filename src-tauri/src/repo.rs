@@ -973,6 +973,7 @@ pub fn update_character_profile(
 }
 
 /// Edición manual completa de una ficha de personaje.
+#[allow(clippy::too_many_arguments)]
 pub fn update_character(
     conn: &Connection,
     id: &str,

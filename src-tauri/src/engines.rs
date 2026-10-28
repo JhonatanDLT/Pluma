@@ -66,7 +66,7 @@ impl FastEmbedder {
 impl Embedder for FastEmbedder {
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         self.model
-            .embed(texts.to_vec(), None)
+            .embed(texts, None)
             .map_err(|e| AppError::Internal(format!("no se pudo generar embeddings: {e}")))
     }
 }

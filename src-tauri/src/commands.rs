@@ -178,7 +178,7 @@ pub fn rename_project(db: State<'_, Db>, id: String, title: String) -> Result<Pr
 #[tauri::command]
 pub fn duplicate_project(db: State<'_, Db>, project_id: String) -> Result<Project> {
     let mut guard = lock(&db)?;
-    repo::duplicate_project(&mut *guard, &project_id)
+    repo::duplicate_project(&mut guard, &project_id)
 }
 
 /// Crea un proyecto de demostración con capítulos y escenas para que un usuario
@@ -209,7 +209,7 @@ El capitán desplegó el mapa sobre la mesa. La tinta se había corrido en el bo
         ),
         None,
     )?;
-    repo::import_manuscript(&mut *guard, &project.id, &manuscript)?;
+    repo::import_manuscript(&mut guard, &project.id, &manuscript)?;
     Ok(project)
 }
 
@@ -328,7 +328,7 @@ pub fn import_markdown(
 ) -> Result<Vec<Chapter>> {
     let manuscript = parser::parse(&markdown);
     let mut guard = lock(&db)?;
-    repo::import_manuscript(&mut *guard, &project_id, &manuscript)
+    repo::import_manuscript(&mut guard, &project_id, &manuscript)
 }
 
 /// Lee un archivo (`.md`, `.txt`, `.pdf` o imagen) y lo importa al proyecto,
@@ -340,7 +340,7 @@ pub fn import_file(db: State<'_, Db>, project_id: String, path: String) -> Resul
     let markdown = extract::extract_markdown(path)?;
     let manuscript = parser::parse(&markdown);
     let mut guard = lock(&db)?;
-    repo::import_manuscript(&mut *guard, &project_id, &manuscript)
+    repo::import_manuscript(&mut guard, &project_id, &manuscript)
 }
 
 /// Crea un proyecto nuevo a partir de un archivo (PDF, EPUB, DOCX, TXT, …),
@@ -376,7 +376,7 @@ pub fn import_file_as_project(
         description,
         cover,
     )?;
-    repo::import_manuscript(&mut *guard, &project.id, &manuscript)?;
+    repo::import_manuscript(&mut guard, &project.id, &manuscript)?;
     Ok(project)
 }
 
@@ -764,21 +764,21 @@ pub async fn analyze_project(
 
         // RAG: indexa las escenas del proyecto reutilizando el embedder ya
         // cargado (evita una segunda carga del modelo).
-        if settings.embeddings {
-            if let Some(e) = embedder_guard.as_mut() {
-                let guard = lock(&db)?;
-                let content = repo::get_project_content(&guard, &project_id)?;
-                let scenes: Vec<(String, String)> = content
-                    .iter()
-                    .flat_map(|(_, scenes)| {
-                        scenes
-                            .iter()
-                            .map(|s| (s.id.clone(), s.content_markdown.clone()))
-                    })
-                    .filter(|(_, c)| !c.trim().is_empty())
-                    .collect();
-                let _ = rag::index_project(&guard, &project_id, &scenes, e);
-            }
+        if settings.embeddings
+            && let Some(e) = embedder_guard.as_mut()
+        {
+            let guard = lock(&db)?;
+            let content = repo::get_project_content(&guard, &project_id)?;
+            let scenes: Vec<(String, String)> = content
+                .iter()
+                .flat_map(|(_, scenes)| {
+                    scenes
+                        .iter()
+                        .map(|s| (s.id.clone(), s.content_markdown.clone()))
+                })
+                .filter(|(_, c)| !c.trim().is_empty())
+                .collect();
+            let _ = rag::index_project(&guard, &project_id, &scenes, e);
         }
 
         analysis
@@ -846,7 +846,7 @@ pub async fn analyze_project(
             character
         })
         .collect();
-    repo::merge_characters(&mut *guard, &project_id, &incoming_characters)?;
+    repo::merge_characters(&mut guard, &project_id, &incoming_characters)?;
 
     // 2. Mapear nombres y alias al ID definitivo (existente o nuevo).
     let merged = repo::list_characters(&guard, &project_id)?;
@@ -881,7 +881,7 @@ pub async fn analyze_project(
             })
         })
         .collect();
-    repo::merge_relationships(&mut *guard, &project_id, &relationships)?;
+    repo::merge_relationships(&mut guard, &project_id, &relationships)?;
 
     // 4. Fusionar entidades (lugares, facciones…).
     let entities: Vec<Entity> = result
@@ -899,7 +899,7 @@ pub async fn analyze_project(
             entity
         })
         .collect();
-    repo::merge_entities(&mut *guard, &project_id, &entities)?;
+    repo::merge_entities(&mut guard, &project_id, &entities)?;
 
     // 5. La huella solo representa el proyecto completo; un análisis parcial de
     //    capítulo no debe marcarlo como «sin cambios».
@@ -1207,12 +1207,12 @@ pub fn ia_status(app: tauri::AppHandle) -> Result<IaStatus> {
 
     // Migración: si una versión anterior guardó la API key en texto plano,
     // muévela al llavero y elimínala del archivo de configuración.
-    if let Some(key) = settings.cloud_api_key.as_deref().map(str::trim) {
-        if !key.is_empty() {
-            crate::secrets::set_cloud_api_key(key)?;
-            settings.cloud_api_key = None;
-            crate::settings::save(&path, &settings)?;
-        }
+    if let Some(key) = settings.cloud_api_key.as_deref().map(str::trim)
+        && !key.is_empty()
+    {
+        crate::secrets::set_cloud_api_key(key)?;
+        settings.cloud_api_key = None;
+        crate::settings::save(&path, &settings)?;
     }
 
     Ok(IaStatus {

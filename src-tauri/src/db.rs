@@ -171,6 +171,8 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
 
+        drop(conn);
+        drop(db);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

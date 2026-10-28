@@ -146,8 +146,8 @@ criterio de aceptación.
 - Modal compartido con focus trap (TD-37). ✅
 - Restauración de backups como proyecto nuevo (TD-27). ✅
 - Logging estructurado (TD-04). ✅
-- Ignorar/añadir al diccionario (TD-43). Pendiente.
-- Corrección IA sin remontar el editor (TD-41). Pendiente.
+- Ignorar/añadir al diccionario (TD-43). ✅
+- Corrección IA sin remontar el editor (TD-41). ✅
 - `clippy -D warnings` y audit (TD-45, TD-46). Pendiente.
 
 ### Sprint 7 — IA y distribución

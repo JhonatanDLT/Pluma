@@ -30,6 +30,11 @@ semántico.
   restauración del foco al salir.
 - **Logging estructurado** en el directorio de logs de la app, sin contenido del
   manuscrito ni claves.
+- **Ortografía:** «Ignorar» (sesión) y «Añadir» (persistente) para nombres
+  propios y palabras del mundo.
+- **Edición sin remontar:** la corrección gramatical, el reemplazo ortográfico y
+  la restauración de versiones actualizan el editor en su sitio, conservando el
+  scroll y recolocando el cursor.
 
 ### Corregido
 

@@ -7,12 +7,14 @@
     installing,
     oninstall,
     onreplace,
+    onignore,
     onclose,
   }: {
     report: SpellReport | null;
     installing: boolean;
     oninstall: (code: string) => void;
     onreplace: (word: string, suggestion: string) => void;
+    onignore: (word: string, permanent: boolean) => void;
     onclose: () => void;
   } = $props();
 </script>
@@ -71,6 +73,12 @@
                   {:else}
                     <span class="spell-nosugg">Sin sugerencias</span>
                   {/if}
+                  <button class="spell-link" onclick={() => onignore(issue.word, false)}>
+                    Ignorar
+                  </button>
+                  <button class="spell-link" onclick={() => onignore(issue.word, true)}>
+                    Añadir
+                  </button>
                 </div>
               </li>
             {/each}
@@ -216,5 +224,21 @@
   .spell-nosugg {
     font-size: 12px;
     color: var(--text-faint);
+  }
+
+  .spell-link {
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  .spell-link:hover {
+    color: var(--accent);
   }
 </style>

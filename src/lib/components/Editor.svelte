@@ -39,15 +39,37 @@
     onchange,
     placeholder = "Escribe tu historia…",
     focus = false,
+    revision = 0,
   }: {
     content: string;
     onchange: (markdown: string) => void;
     placeholder?: string;
     focus?: boolean;
+    revision?: number;
   } = $props();
 
   let editorEl: HTMLDivElement;
   let editor: Editor;
+  let lastRevision = -1;
+
+  // Actualiza el contenido desde fuera (corrección, ortografía, snapshot) sin
+  // remontar el editor: conserva el scroll y recoloca el cursor.
+  $effect(() => {
+    if (!editor) return;
+    if (lastRevision === -1) {
+      lastRevision = revision;
+      return;
+    }
+    if (revision === lastRevision) return;
+    lastRevision = revision;
+    const { from, to } = editor.state.selection;
+    editor.commands.setContent(markdownToHtml(content), false);
+    const size = editor.state.doc.content.size;
+    editor.commands.setTextSelection({
+      from: Math.min(from, size),
+      to: Math.min(to, size),
+    });
+  });
 
   let linkOpen = $state(false);
   let linkUrl = $state("");

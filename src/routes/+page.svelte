@@ -110,6 +110,56 @@
   let changeLog = $state<ChangeEntry[]>([]);
   let spellOpen = $state(false);
   let spellReport = $state<SpellReport | null>(null);
+  const SPELL_IGNORED_KEY = "pluma.spell.ignored";
+  let ignoredWords = $state<string[]>(loadIgnoredWords());
+  let sessionIgnored = $state<string[]>([]);
+
+  function loadIgnoredWords(): string[] {
+    try {
+      const raw = localStorage.getItem(SPELL_IGNORED_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function isIgnored(word: string): boolean {
+    const key = word.toLowerCase();
+    return (
+      ignoredWords.some((w) => w.toLowerCase() === key) ||
+      sessionIgnored.some((w) => w.toLowerCase() === key)
+    );
+  }
+
+  function filterSpellReport(report: SpellReport): SpellReport {
+    return {
+      ...report,
+      issues: report.issues.filter((issue) => !isIgnored(issue.word)),
+    };
+  }
+
+  function ignoreWord(word: string, permanent: boolean) {
+    if (permanent) {
+      if (!ignoredWords.some((w) => w.toLowerCase() === word.toLowerCase())) {
+        ignoredWords = [...ignoredWords, word];
+        try {
+          localStorage.setItem(SPELL_IGNORED_KEY, JSON.stringify(ignoredWords));
+        } catch {
+          // Sin localStorage el ignore permanente dura la sesión.
+        }
+      }
+    } else if (
+      !sessionIgnored.some((w) => w.toLowerCase() === word.toLowerCase())
+    ) {
+      sessionIgnored = [...sessionIgnored, word];
+    }
+    if (spellReport) {
+      spellReport = {
+        ...spellReport,
+        issues: spellReport.issues.filter((issue) => issue.word !== word),
+      };
+    }
+  }
   let spellBusy = $state(false);
 
   // Paneles redimensionables / colapsables (persistidos entre sesiones).
@@ -1229,7 +1279,7 @@
     if (!selectedSceneId) return;
     spellBusy = true;
     try {
-      spellReport = await api.spellCheck(sceneContent);
+      spellReport = filterSpellReport(await api.spellCheck(sceneContent));
       spellOpen = true;
     } catch (e) {
       reportError(e);
@@ -1242,7 +1292,7 @@
     spellBusy = true;
     try {
       await api.spellInstall(code);
-      spellReport = await api.spellCheck(sceneContent);
+      spellReport = filterSpellReport(await api.spellCheck(sceneContent));
     } catch (e) {
       reportError(e);
     } finally {
@@ -1686,11 +1736,20 @@
         </div>
       {/if}
       {#if selectedSceneId}
-        {#key `${selectedSceneId}-${editorRevision}`}
+        {#key selectedSceneId}
           {#if mode === "wysiwyg"}
-            <Editor content={sceneContent} onchange={onContentChange} focus={focusMode} />
+            <Editor
+              content={sceneContent}
+              onchange={onContentChange}
+              focus={focusMode}
+              revision={editorRevision}
+            />
           {:else}
-            <SourceEditor content={sceneContent} onchange={onContentChange} />
+            <SourceEditor
+              content={sceneContent}
+              onchange={onContentChange}
+              revision={editorRevision}
+            />
           {/if}
         {/key}
       {:else}
@@ -1805,6 +1864,7 @@
       installing={spellBusy}
       oninstall={installSpell}
       onreplace={replaceWord}
+      onignore={ignoreWord}
       onclose={() => (spellOpen = false)}
     />
   {/if}

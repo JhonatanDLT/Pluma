@@ -7,14 +7,35 @@
     content,
     onchange,
     placeholder = "",
+    revision = 0,
   }: {
     content: string;
     onchange: (markdown: string) => void;
     placeholder?: string;
+    revision?: number;
   } = $props();
 
   let container: HTMLDivElement;
   let view: EditorView;
+  let lastRevision = -1;
+
+  // Aplica cambios externos sin recrear el editor.
+  $effect(() => {
+    if (!view) return;
+    if (lastRevision === -1) {
+      lastRevision = revision;
+      return;
+    }
+    if (revision === lastRevision) return;
+    lastRevision = revision;
+    const current = view.state.doc.toString();
+    if (current === content) return;
+    const pos = Math.min(view.state.selection.main.head, content.length);
+    view.dispatch({
+      changes: { from: 0, to: current.length, insert: content },
+      selection: { anchor: pos },
+    });
+  });
 
   const theme = EditorView.theme({
     "&": {

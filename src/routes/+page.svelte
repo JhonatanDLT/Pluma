@@ -23,6 +23,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import type {
+    BackupInfo,
     ChangeEntry,
     Chapter,
     Character,
@@ -100,6 +101,8 @@
   let profiles = $state<ProfileInfo[]>([]);
   let snapshots = $state<SnapshotMeta[]>([]);
   let snapshotBusy = $state(false);
+  let backups = $state<BackupInfo[]>([]);
+  let backupBusy = $state(false);
   let navigation = $state<NavEntry[]>([]);
   let switcherOpen = $state(false);
   let exportOpen = $state(false);
@@ -183,6 +186,7 @@
     await loadCloudProviders();
     await loadProfiles();
     await loadTtsVoices();
+    await loadBackups();
   });
 
   onMount(() => {
@@ -1267,6 +1271,51 @@
     snapshots = await api.listSnapshots(selectedProjectId);
   }
 
+  async function loadBackups() {
+    try {
+      backups = await api.listBackups();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function createBackup() {
+    backupBusy = true;
+    try {
+      await api.backupDatabase();
+      await loadBackups();
+      logChange("Copia de seguridad creada");
+    } catch (e) {
+      reportError(e);
+    } finally {
+      backupBusy = false;
+    }
+  }
+
+  async function restoreBackupFile(file: string) {
+    backupBusy = true;
+    try {
+      const project = await api.restoreBackup(file);
+      projects = await api.listProjects();
+      await selectProject(project.id);
+      logChange(`Copia restaurada como proyecto: ${project.title}`);
+    } catch (e) {
+      reportError(e);
+    } finally {
+      backupBusy = false;
+    }
+  }
+
+  async function deleteBackupFile(file: string) {
+    if (!window.confirm(`¿Eliminar la copia ${file}?`)) return;
+    try {
+      await api.deleteBackup(file);
+      await loadBackups();
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
   async function createSnapshot(message: string | null) {
     if (!selectedProjectId) return;
     snapshotBusy = true;
@@ -1682,6 +1731,12 @@
             onrestoresnapshot={restoreSnapshot}
             ondeletesnapshot={deleteSnapshot}
             onloadsnapshots={loadSnapshots}
+            {backups}
+            {backupBusy}
+            oncreatebackup={createBackup}
+            onrestorebackup={restoreBackupFile}
+            ondeletebackup={deleteBackupFile}
+            onrefreshbackups={loadBackups}
             {iaStatus}
             {cloudProviders}
             {profiles}

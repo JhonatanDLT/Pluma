@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { trapFocus } from "$lib/focusTrap";
   import type { ChangeEntry, Character, Entity, Relationship } from "$lib/types";
 
   let {
@@ -189,7 +190,13 @@
 <div class="wb-overlay">
   <button class="wb-backdrop" aria-label="Cerrar" onclick={onclose}></button>
 
-  <div class="wb-dialog" role="dialog" aria-modal="true">
+  <div
+    class="wb-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="World Building"
+    use:trapFocus={{ onClose: onclose }}
+  >
     <header class="wb-head">
       <div class="wb-title">
         <h2>World Building</h2>

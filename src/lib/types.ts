@@ -105,6 +105,13 @@ export interface Entity {
   updated_at: string;
 }
 
+export interface BackupInfo {
+  file: string;
+  size: number;
+  created_at: string;
+  kind: "auto" | "manual";
+}
+
 export interface SearchHit {
   scene_id: string;
   chapter_id: string;

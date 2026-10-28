@@ -49,7 +49,7 @@ impl Db {
         if let Ok(status) = conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
         {
             if status != "ok" {
-                eprintln!("[pluma] advertencia: quick_check de SQLite: {status}");
+                log::warn!("quick_check de SQLite: {status}");
             }
         }
 

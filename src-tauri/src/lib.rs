@@ -1,3 +1,4 @@
+mod backup;
 mod commands;
 mod db;
 mod engines;
@@ -62,6 +63,19 @@ pub fn run() {
                 }
             }
         }))
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("pluma".into()),
+                    },
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -72,6 +86,7 @@ pub fn run() {
             let resource_dir = app.path().resource_dir().ok();
             crate::runtime::prepare(&dir, resource_dir.as_deref());
             let db = db::Db::open(&dir.join("pluma.db"))?;
+            log::info!("Pluma iniciada; datos en {}", dir.display());
             // Copia automática diaria antes de que el usuario empiece a escribir.
             if let Ok(conn) = db.conn.lock() {
                 let _ = crate::commands::maybe_auto_backup(&conn, &dir);
@@ -123,6 +138,9 @@ pub fn run() {
             commands::move_scene,
             commands::export_project,
             commands::backup_database,
+            commands::list_backups,
+            commands::restore_backup,
+            commands::delete_backup,
             commands::persist_image,
             commands::list_characters,
             commands::list_relationships,

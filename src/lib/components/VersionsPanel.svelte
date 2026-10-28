@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SnapshotMeta } from "$lib/types";
+  import type { BackupInfo, SnapshotMeta } from "$lib/types";
 
   let {
     snapshots,
@@ -7,12 +7,24 @@
     oncreate,
     onrestore,
     ondelete,
+    backups,
+    backupBusy,
+    oncreatebackup,
+    onrestorebackup,
+    ondeletebackup,
+    onrefreshbackups,
   }: {
     snapshots: SnapshotMeta[];
     busy: boolean;
     oncreate: (message: string | null) => void;
     onrestore: (id: string) => void;
     ondelete: (id: string) => void;
+    backups: BackupInfo[];
+    backupBusy: boolean;
+    oncreatebackup: () => void;
+    onrestorebackup: (file: string) => void;
+    ondeletebackup: (file: string) => void;
+    onrefreshbackups: () => void;
   } = $props();
 
   let message = $state("");
@@ -27,6 +39,12 @@
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
     return d.toLocaleString();
+  }
+
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 </script>
 
@@ -68,6 +86,49 @@
           <div class="snap-actions">
             <button class="btn-icon" title="Restaurar esta versión" onclick={() => onrestore(s.id)}>↩</button>
             <button class="btn-icon" title="Eliminar versión" onclick={() => ondelete(s.id)}>×</button>
+          </div>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
+  <div class="panel-head backup-head">
+    <span class="label">Copias de seguridad</span>
+    <div class="backup-actions">
+      <button class="btn-icon" title="Actualizar lista" onclick={onrefreshbackups}>↻</button>
+      <button class="btn" onclick={oncreatebackup} disabled={backupBusy}>
+        {backupBusy ? "Creando…" : "Crear copia"}
+      </button>
+    </div>
+  </div>
+
+  {#if backups.length === 0}
+    <p class="hint">
+      Crea una copia para proteger el manuscrito. Pluma también guarda una copia
+      automática al día (retención de 14).
+    </p>
+  {:else}
+    <ul class="snap-list">
+      {#each backups as b (b.file)}
+        <li>
+          <div class="snap-main">
+            <span class="snap-date">{formatDate(b.created_at)}</span>
+            <span class="snap-meta">
+              {b.kind === "auto" ? "Automática" : "Manual"} · {formatSize(b.size)}
+            </span>
+            <span class="snap-msg">{b.file}</span>
+          </div>
+          <div class="snap-actions">
+            <button
+              class="btn-icon"
+              title="Restaurar como proyecto nuevo"
+              onclick={() => onrestorebackup(b.file)}
+            >↩</button>
+            <button
+              class="btn-icon"
+              title="Eliminar copia"
+              onclick={() => ondeletebackup(b.file)}
+            >×</button>
           </div>
         </li>
       {/each}
@@ -166,5 +227,21 @@
   .snap-actions {
     display: flex;
     gap: 2px;
+  }
+
+  .backup-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+    padding-top: 14px;
+  }
+
+  .backup-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 </style>

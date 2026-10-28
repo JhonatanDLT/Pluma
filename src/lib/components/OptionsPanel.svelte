@@ -5,6 +5,7 @@
   import AiSettings from "$lib/components/AiSettings.svelte";
   import AppearanceSettings from "$lib/components/AppearanceSettings.svelte";
   import type {
+    BackupInfo,
     Chapter,
     CloudProviderInfo,
     IaStatus,
@@ -30,6 +31,12 @@
     onrestoresnapshot,
     ondeletesnapshot,
     onloadsnapshots,
+    backups,
+    backupBusy,
+    oncreatebackup,
+    onrestorebackup,
+    ondeletebackup,
+    onrefreshbackups,
     iaStatus,
     cloudProviders,
     profiles,
@@ -68,6 +75,12 @@
     onrestoresnapshot: (id: string) => void;
     ondeletesnapshot: (id: string) => void;
     onloadsnapshots: () => void;
+    backups: BackupInfo[];
+    backupBusy: boolean;
+    oncreatebackup: () => void;
+    onrestorebackup: (file: string) => void;
+    ondeletebackup: (file: string) => void;
+    onrefreshbackups: () => void;
     iaStatus: IaStatus | null;
     cloudProviders: CloudProviderInfo[];
     profiles: ProfileInfo[];
@@ -138,6 +151,12 @@
         oncreate={oncreatesnapshot}
         onrestore={onrestoresnapshot}
         ondelete={ondeletesnapshot}
+        {backups}
+        {backupBusy}
+        {oncreatebackup}
+        {onrestorebackup}
+        {ondeletebackup}
+        {onrefreshbackups}
       />
     {:else}
       <div class="settings-panel">

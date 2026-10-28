@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AnalysisReport,
+  BackupInfo,
   Chapter,
   Character,
   CloudProviderInfo,
@@ -228,6 +229,11 @@ export const iaApplyProfile = (profile: string) =>
 
 // Copias de seguridad
 export const backupDatabase = () => invoke<string>("backup_database");
+export const listBackups = () => invoke<BackupInfo[]>("list_backups");
+export const restoreBackup = (file: string) =>
+  invoke<Project>("restore_backup", { file });
+export const deleteBackup = (file: string) =>
+  invoke<void>("delete_backup", { file });
 
 // Archivos abiertos por asociación de archivos o línea de comandos
 export const takeOpenedFiles = () => invoke<string[]>("take_opened_files");

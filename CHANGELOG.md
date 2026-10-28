@@ -24,6 +24,12 @@ semántico.
   reenvía el archivo que se haya abierto por asociación.
 - El reemplazo ortográfico afecta solo a la ocurrencia seleccionada.
 - `cargo fmt --check` en CI.
+- **Restauración de copias de seguridad desde la UI**: se abren como proyecto
+  nuevo, migrando la copia a un temporal para no tocar el manuscrito en curso.
+- **Focus trap** en modales: Tab/Shift+Tab atrapado, Escape para cerrar y
+  restauración del foco al salir.
+- **Logging estructurado** en el directorio de logs de la app, sin contenido del
+  manuscrito ni claves.
 
 ### Corregido
 

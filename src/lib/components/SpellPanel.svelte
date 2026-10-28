@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { trapFocus } from "$lib/focusTrap";
   import type { SpellReport } from "$lib/types";
 
   let {
@@ -20,7 +21,13 @@
   <div class="spell-overlay">
     <button class="spell-backdrop" aria-label="Cerrar" onclick={onclose}></button>
 
-    <div class="spell-dialog" role="dialog" aria-modal="true">
+    <div
+      class="spell-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Ortografía"
+      use:trapFocus={{ onClose: onclose }}
+    >
       <header class="spell-head">
         <div>
           <h2>Ortografía</h2>

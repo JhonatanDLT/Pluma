@@ -5,6 +5,7 @@ use std::sync::MutexGuard;
 use rusqlite::Connection;
 use tauri::{Emitter, Manager, State};
 
+use crate::backup;
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::export;
@@ -479,7 +480,32 @@ pub fn backup_database(app: tauri::AppHandle, db: State<'_, Db>) -> Result<Strin
     let dest = dir.join(format!("pluma-{stamp}.db"));
     let conn = lock(&db)?;
     conn.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()])?;
+    log::info!("copia de seguridad creada: {}", dest.display());
     Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Lista las copias de seguridad disponibles.
+#[tauri::command]
+pub fn list_backups(app: tauri::AppHandle) -> Result<Vec<backup::BackupInfo>> {
+    let dir = data_dir(&app)?;
+    backup::list(&dir)
+}
+
+/// Restaura una copia como proyecto nuevo, sin tocar el proyecto en curso.
+#[tauri::command(async)]
+pub fn restore_backup(app: tauri::AppHandle, db: State<'_, Db>, file: String) -> Result<Project> {
+    let dir = data_dir(&app)?;
+    let mut guard = lock(&db)?;
+    let project = backup::restore_as_project(&mut guard, &dir, &file)?;
+    log::info!("copia restaurada como proyecto: {}", project.title);
+    Ok(project)
+}
+
+/// Borra una copia de seguridad manual o automática.
+#[tauri::command]
+pub fn delete_backup(app: tauri::AppHandle, file: String) -> Result<()> {
+    let dir = data_dir(&app)?;
+    backup::delete(&dir, &file)
 }
 
 /// Copia automática diaria (como máximo una por día). Se invoca al arrancar.

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import DOMPurify from "dompurify";
   import * as api from "$lib/api";
+  import { trapFocus } from "$lib/focusTrap";
   import type { SearchHit } from "$lib/types";
 
   let {
@@ -95,6 +96,7 @@
     role="dialog"
     aria-modal="true"
     aria-label="Buscar en la novela"
+    use:trapFocus={{ onClose: onclose }}
   >
     <div class="search-input-row">
       <input

@@ -2,6 +2,7 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
   import * as api from "$lib/api";
+  import { trapFocus } from "$lib/focusTrap";
   import type { Project } from "$lib/types";
 
   let {
@@ -188,7 +189,13 @@
   {#if formOpen}
     <div class="form-overlay">
       <button class="form-backdrop" aria-label="Cerrar" onclick={() => (formOpen = false)}></button>
-      <div class="form" role="dialog" aria-modal="true">
+      <div
+        class="form"
+        role="dialog"
+        aria-modal="true"
+        aria-label={formMode === "import" ? "Importar proyecto" : "Nuevo proyecto"}
+        use:trapFocus={{ onClose: () => (formOpen = false) }}
+      >
         <h3>{formMode === "import" ? "Importar proyecto" : "Nuevo proyecto"}</h3>
 
         <label class="field">

@@ -122,12 +122,56 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<()> {
 
 /// Duplica un proyecto completo (capítulos, escenas, biblia y relaciones).
 /// Los snapshots y los embeddings no se copian: se reconstruyen si hace falta.
-pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Project> {
-    let source = get_project(conn, project_id)?
+/// Copia en memoria de un proyecto completo (capítulos, escenas, biblia y
+/// relaciones). Permite duplicar un proyecto o restaurar una copia de
+/// seguridad sin acoplar la lectura a la escritura.
+#[derive(Debug, Clone)]
+pub struct ProjectSnapshot {
+    pub project: Project,
+    pub chapters: Vec<Chapter>,
+    pub scenes: Vec<Scene>,
+    pub characters: Vec<Character>,
+    pub relationships: Vec<Relationship>,
+    pub entities: Vec<Entity>,
+}
+
+pub fn read_project_snapshot(conn: &Connection, project_id: &str) -> Result<ProjectSnapshot> {
+    let project = get_project(conn, project_id)?
         .ok_or_else(|| AppError::NotFound(format!("proyecto {project_id}")))?;
+    let chapters = list_chapters(conn, project_id)?;
+    let mut scenes = Vec::new();
+    for chapter in &chapters {
+        scenes.extend(list_scenes_full(conn, &chapter.id)?);
+    }
+    let characters = list_characters(conn, project_id)?;
+    let relationships = list_relationships(conn, project_id)?;
+    let entities = list_entities(conn, project_id)?;
+    Ok(ProjectSnapshot {
+        project,
+        chapters,
+        scenes,
+        characters,
+        relationships,
+        entities,
+    })
+}
+
+/// Inserta un snapshot como proyecto nuevo. Genera IDs nuevos para todas las
+/// entidades y relaciones, y conserva los campos editados.
+pub fn insert_project_snapshot(
+    conn: &mut Connection,
+    snapshot: &ProjectSnapshot,
+    title_suffix: &str,
+) -> Result<Project> {
+    let source = &snapshot.project;
+    let new_project = Project::new(format!("{} ({title_suffix})", source.title));
+    let cover = source
+        .cover_path
+        .as_deref()
+        .filter(|p| std::path::Path::new(p).is_file())
+        .map(str::to_string);
 
     let tx = conn.transaction()?;
-    let new_project = Project::new(format!("{} (copia)", source.title));
     tx.execute(
         "INSERT INTO project (id, title, author, description, word_goal, cover_path,
          level1_name, level2_name, created_at, updated_at)
@@ -135,10 +179,10 @@ pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Proj
         params![
             new_project.id,
             new_project.title,
-            source.author,
-            source.description,
+            source.author.as_deref(),
+            source.description.as_deref(),
             source.word_goal,
-            source.cover_path,
+            cover.as_deref(),
             source.level1_name,
             source.level2_name,
             new_project.created_at,
@@ -146,8 +190,10 @@ pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Proj
         ],
     )?;
 
-    for chapter in list_chapters(&tx, project_id)? {
+    let mut chapter_ids: HashMap<String, String> = HashMap::new();
+    for chapter in &snapshot.chapters {
         let new_chapter = Chapter::new(&new_project.id, &chapter.title, chapter.position);
+        chapter_ids.insert(chapter.id.clone(), new_chapter.id.clone());
         tx.execute(
             "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -157,37 +203,41 @@ pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Proj
                 new_chapter.position,
                 chapter.title,
                 chapter.status,
-                chapter.summary,
+                chapter.summary.as_deref(),
                 chapter.word_count
             ],
         )?;
-        for scene in list_scenes_full(&tx, &chapter.id)? {
-            let new_scene = Scene::new(&new_chapter.id, scene.position, scene.title.clone());
-            tx.execute(
-                "INSERT INTO scene (id, chapter_id, position, title, content_markdown,
-                 summary, word_count, created_at, updated_at, status, pov, location, time_label)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                params![
-                    new_scene.id,
-                    new_chapter.id,
-                    scene.position,
-                    scene.title,
-                    scene.content_markdown,
-                    scene.summary,
-                    scene.word_count,
-                    new_scene.created_at,
-                    new_scene.updated_at,
-                    scene.status,
-                    scene.pov,
-                    scene.location,
-                    scene.time_label
-                ],
-            )?;
-        }
+    }
+
+    for scene in &snapshot.scenes {
+        let Some(new_chapter_id) = chapter_ids.get(&scene.chapter_id) else {
+            continue;
+        };
+        let new_scene = Scene::new(new_chapter_id, scene.position, scene.title.clone());
+        tx.execute(
+            "INSERT INTO scene (id, chapter_id, position, title, content_markdown,
+             summary, word_count, created_at, updated_at, status, pov, location, time_label)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                new_scene.id,
+                new_chapter_id,
+                scene.position,
+                scene.title.as_deref(),
+                scene.content_markdown,
+                scene.summary.as_deref(),
+                scene.word_count,
+                new_scene.created_at,
+                new_scene.updated_at,
+                scene.status,
+                scene.pov.as_deref(),
+                scene.location.as_deref(),
+                scene.time_label.as_deref()
+            ],
+        )?;
     }
 
     let mut character_ids: HashMap<String, String> = HashMap::new();
-    for c in list_characters(&tx, project_id)? {
+    for c in &snapshot.characters {
         let new_id = uuid::Uuid::new_v4().to_string();
         character_ids.insert(c.id.clone(), new_id.clone());
         tx.execute(
@@ -198,21 +248,21 @@ pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Proj
                 new_id,
                 new_project.id,
                 c.name,
-                json(c.aliases),
-                c.role,
-                c.description,
-                c.biography,
-                json(c.traits),
-                json(c.goals),
-                c.arc,
-                c.color,
+                json(c.aliases.clone()),
+                c.role.as_deref(),
+                c.description.as_deref(),
+                c.biography.as_deref(),
+                json(c.traits.clone()),
+                json(c.goals.clone()),
+                c.arc.as_deref(),
+                c.color.as_deref(),
                 c.created_at,
                 c.updated_at
             ],
         )?;
     }
 
-    for r in list_relationships(&tx, project_id)? {
+    for r in &snapshot.relationships {
         if let (Some(a), Some(b)) = (
             character_ids.get(&r.character_a_id),
             character_ids.get(&r.character_b_id),
@@ -225,15 +275,15 @@ pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Proj
                     new_project.id,
                     a,
                     b,
-                    r.kind,
+                    r.kind.as_deref(),
                     r.intensity,
-                    r.description
+                    r.description.as_deref()
                 ],
             )?;
         }
     }
 
-    for e in list_entities(&tx, project_id)? {
+    for e in &snapshot.entities {
         tx.execute(
             "INSERT INTO entity (id, project_id, name, entity_type, aliases_json,
              description, mention_count, created_at, updated_at)
@@ -243,8 +293,8 @@ pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Proj
                 new_project.id,
                 e.name,
                 e.entity_type,
-                json(e.aliases),
-                e.description,
+                json(e.aliases.clone()),
+                e.description.as_deref(),
                 e.mention_count,
                 e.created_at,
                 e.updated_at
@@ -255,6 +305,11 @@ pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Proj
     tx.commit()?;
     get_project(conn, &new_project.id)?
         .ok_or_else(|| AppError::Internal("no se pudo duplicar el proyecto".into()))
+}
+
+pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Project> {
+    let snapshot = read_project_snapshot(conn, project_id)?;
+    insert_project_snapshot(conn, &snapshot, "copia")
 }
 
 pub fn update_project_goal(conn: &Connection, id: &str, goal: i64) -> Result<Project> {

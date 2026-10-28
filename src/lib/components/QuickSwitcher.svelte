@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { trapFocus } from "$lib/focusTrap";
   import type { NavEntry } from "$lib/types";
 
   let {
@@ -100,7 +101,13 @@
 
 <div class="switcher-overlay">
   <button class="switcher-backdrop" aria-label="Cerrar" onclick={onclose}></button>
-  <div class="switcher" role="dialog" aria-modal="true">
+  <div
+    class="switcher"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Ir a capítulo o escena"
+    use:trapFocus={{ onClose: onclose }}
+  >
     <div class="switcher-input-row">
       <input
         class="switcher-input"

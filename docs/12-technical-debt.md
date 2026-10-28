@@ -136,16 +136,18 @@ criterio de aceptación.
 
 ### Sprint 6 — Accesibilidad y confianza (en curso)
 
-> Estado: single-instance (TD-05), reemplazo de una sola ocurrencia (TD-42) y
-> `cargo fmt --check` en CI (parte de TD-45) completados.
+> Estado: single-instance (TD-05), reemplazo de una sola ocurrencia (TD-42),
+> `cargo fmt --check` en CI (TD-45), restauración de backups (TD-27), focus trap
+> (TD-37) y logging estructurado (TD-04) completados.
 
 - Reemplazo ortográfico de una ocurrencia (TD-42). ✅
 - Single-instance (TD-05). ✅
 - `cargo fmt --check` en CI (TD-45). ✅ (clippy pendiente)
-- Modal compartido con focus trap (TD-37). Pendiente.
+- Modal compartido con focus trap (TD-37). ✅
+- Restauración de backups como proyecto nuevo (TD-27). ✅
+- Logging estructurado (TD-04). ✅
 - Ignorar/añadir al diccionario (TD-43). Pendiente.
 - Corrección IA sin remontar el editor (TD-41). Pendiente.
-- Logging estructurado (TD-04). Pendiente.
 - `clippy -D warnings` y audit (TD-45, TD-46). Pendiente.
 
 ### Sprint 7 — IA y distribución

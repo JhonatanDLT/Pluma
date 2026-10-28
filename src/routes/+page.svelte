@@ -1256,6 +1256,29 @@
     try {
       await api.saveScene(id, sceneContent);
       if (selectedSceneId === id) saveState = "saved";
+
+      // Refresca contadores en memoria (el panel no debe quedarse obsoleto
+      // mientras se escribe) sin volver a consultar la base de datos.
+      const words = countWords(sceneContent);
+      if (currentScene && currentScene.id === id) {
+        const delta = words - currentScene.word_count;
+        if (delta !== 0 && selectedChapterId) {
+          chapters = chapters.map((c) =>
+            c.id === selectedChapterId
+              ? { ...c, word_count: Math.max(0, c.word_count + delta) }
+              : c,
+          );
+          scenes = scenes.map((s) =>
+            s.id === id ? { ...s, word_count: words } : s,
+          );
+        }
+        currentScene = {
+          ...currentScene,
+          word_count: words,
+          content_markdown: sceneContent,
+        };
+      }
+
       clearJournal(id);
       return true;
     } catch (e) {
@@ -1419,7 +1442,12 @@
           <span class="wordcount">{wordCount.toLocaleString()} palabras</span>
         {/if}
 
-        <span class="save-status" class:error={saveState === "error"}>
+        <span
+          class="save-status"
+          class:error={saveState === "error"}
+          role="status"
+          aria-live="polite"
+        >
           {#if saveState === "saving"}Guardando…{/if}
           {#if saveState === "saved"}Guardado{/if}
           {#if saveState === "error"}Error al guardar{/if}

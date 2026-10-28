@@ -328,7 +328,7 @@ pub fn import_markdown(
 
 /// Lee un archivo (`.md`, `.txt`, `.pdf` o imagen) y lo importa al proyecto,
 /// extrayendo texto según su formato (extracción de PDF u OCR para imágenes).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_file(db: State<'_, Db>, project_id: String, path: String) -> Result<Vec<Chapter>> {
     let path = std::path::Path::new(&path);
     validate_import_path(path)?;
@@ -340,7 +340,7 @@ pub fn import_file(db: State<'_, Db>, project_id: String, path: String) -> Resul
 
 /// Crea un proyecto nuevo a partir de un archivo (PDF, EPUB, DOCX, TXT, …),
 /// usando el nombre del archivo como título del proyecto.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_file_as_project(
     app: tauri::AppHandle,
     db: State<'_, Db>,
@@ -494,7 +494,7 @@ pub fn maybe_auto_backup(conn: &Connection, data_dir: &std::path::Path) -> Resul
 // Exportación
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_project(
     db: State<'_, Db>,
     project_id: String,
@@ -913,7 +913,7 @@ pub fn enrich_project(
 }
 
 /// Corrige gramática, ortografía y puntuación con un LLM local (Ollama).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn correct_text(app: tauri::AppHandle, text: String, model: Option<String>) -> Result<String> {
     let settings = crate::settings::load(&settings_path(&app)?);
     let backend = llm::resolve_backend(&settings, model.as_deref(), llm::GRAMMAR_MODEL);
@@ -921,7 +921,7 @@ pub fn correct_text(app: tauri::AppHandle, text: String, model: Option<String>) 
 }
 
 /// Conversa con el LLM local (Ollama) como asistente de escritura.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat(
     app: tauri::AppHandle,
     db: State<'_, Db>,
@@ -1028,13 +1028,13 @@ pub fn index_project(
 }
 
 /// Revisa la ortografía de un texto (Hunspell, sin LLM).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn spell_check(app: tauri::AppHandle, text: String) -> Result<crate::spell::SpellReport> {
     crate::spell::check(&data_dir(&app)?, &text)
 }
 
 /// Descarga e instala el diccionario Hunspell de un idioma.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn spell_install(app: tauri::AppHandle, code: String) -> Result<()> {
     crate::spell::install(&data_dir(&app)?, &code)
 }
@@ -1209,7 +1209,7 @@ pub fn ia_cloud_providers() -> Vec<crate::llm::CloudProviderInfo> {
     crate::llm::cloud_providers()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ia_install(app: tauri::AppHandle, engine: String) -> Result<()> {
     let data_dir = data_dir(&app)?;
     match engine.as_str() {

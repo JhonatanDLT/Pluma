@@ -124,11 +124,14 @@
   onMount(() => {
     function onKeydown(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        findOpen = true;
-        queueMicrotask(() => findInput?.focus());
-      }
+      if (!mod || e.key.toLowerCase() !== "f") return;
+      // Solo intercepta «buscar» cuando el foco está dentro del editor; así no
+      // secuestra Ctrl/Cmd+F en el asistente, metadatos u otros campos.
+      const target = e.target as HTMLElement | null;
+      if (!target || !target.closest(".editor")) return;
+      e.preventDefault();
+      findOpen = true;
+      queueMicrotask(() => findInput?.focus());
     }
     document.addEventListener("keydown", onKeydown);
     return () => document.removeEventListener("keydown", onKeydown);

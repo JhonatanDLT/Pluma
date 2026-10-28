@@ -38,6 +38,7 @@ fn resolve_data_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             let dir = resolve_data_dir(app.handle())?;
             // Prepara el runtime de ONNX Runtime (fija ORT_DYLIB_PATH si ya está

@@ -110,10 +110,7 @@ pub fn restore_as_project(
 
     let result = (|| {
         let db = crate::db::Db::open(&temp)?;
-        let guard = db
-            .conn
-            .lock()
-            .map_err(|_| AppError::Internal("la copia está corrupta".into()))?;
+        let guard = db.get()?;
         let conn: &Connection = &guard;
 
         let has_project: i64 = conn.query_row(

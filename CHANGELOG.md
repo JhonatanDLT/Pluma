@@ -61,6 +61,9 @@ semántico.
 - **Assets portables:** portadas e imágenes se guardan como rutas relativas al
   directorio de datos (`covers/…`, `images/…`) y se resuelven a absolutas al
   abrir/exportar. Migración idempotente para proyectos antiguos.
+- **Pool de conexiones SQLite:** se sustituye el `Mutex<Connection>` único por
+  un pool pequeño con WAL, `busy_timeout` y `foreign_keys` por conexión. Las
+  consultas cortas ya no se serializan detrás de un lock global.
 
 ### Corregido
 

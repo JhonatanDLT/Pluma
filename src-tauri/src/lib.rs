@@ -89,7 +89,7 @@ pub fn run() {
             let db = db::Db::open(&dir.join("pluma.db"))?;
             log::info!("Pluma iniciada; datos en {}", dir.display());
             crate::engines::verify_model_revisions(&dir);
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = db.get() {
                 // Migración idempotente: rutas absolutas antiguas → relativas.
                 let _ = crate::assets::normalize_existing(&conn, &dir);
                 // Copia automática diaria antes de que el usuario escriba.

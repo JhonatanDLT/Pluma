@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::MutexGuard;
 
 use rusqlite::Connection;
 use tauri::{Emitter, Manager, State};
@@ -8,7 +7,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::assets;
 use crate::backup;
-use crate::db::Db;
+use crate::db::{Db, DbConn};
 use crate::engines::Embedder;
 use crate::error::{AppError, Result};
 use crate::export;
@@ -25,12 +24,10 @@ use crate::repo;
 use crate::settings::IaSettings;
 use crate::tts;
 
-/// Adquiere el guard del `Mutex<Connection>` de forma segura, convirtiendo un
-/// posible envenenamiento en un error de dominio en lugar de un pánico.
-fn lock<'a>(db: &'a State<'_, Db>) -> Result<MutexGuard<'a, Connection>> {
-    db.conn
-        .lock()
-        .map_err(|_| AppError::Internal("estado de base de datos corrupto".into()))
+/// Toma una conexión del pool. El `DbConn` la devuelve al pool al salir de
+/// ámbito, igual que un guard, pero permite varias conexiones concurrentes.
+fn lock<'a>(db: &'a State<'_, Db>) -> Result<DbConn<'a>> {
+    db.get()
 }
 
 /// Adquiere el guard de un `Mutex` de modelos de forma segura.

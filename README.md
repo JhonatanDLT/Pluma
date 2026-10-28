@@ -1,9 +1,40 @@
 # Pluma — Editor de narrativa literaria
 
-> Aplicación de escritorio para escribir novelas y relatos con un editor híbrido
-> tipo **Notion/Obsidian + Word**, construida con **Svelte 5**, **Tauri v2** y
-> **Rust**. Incluye estructura narrativa automática (capítulos/escenas), base para
-> **personajes y relaciones** con **IA local ligera**, y **TTS** básico (ampliable a IA).
+[![CI](https://github.com/JhonatanDLT/Pluma/actions/workflows/ci.yml/badge.svg)](https://github.com/JhonatanDLT/Pluma/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/JhonatanDLT/Pluma?include_prereleases&sort=semver)](https://github.com/JhonatanDLT/Pluma/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/Rust-2024-orange?logo=rust)
+![Svelte 5](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)
+
+> **Tu novela no sale de tu portátil.**
+>
+> Pluma es una aplicación de escritorio para escribir novelas y relatos con un
+> editor híbrido tipo **Notion/Obsidian + Word**, una **biblia de la novela**
+> que se llena sola y **IA local opcional**. Construida con **Svelte 5**,
+> **Tauri v2** y **Rust**.
+
+### ¿Por qué Pluma?
+
+- **Privacidad real:** el manuscrito vive en tu disco (SQLite). La IA en la nube
+  es opt-in y requiere consentimiento explícito.
+- **Pensada para sagas:** jerarquía de capítulos/escenas, objetivos de palabras,
+  versiones y búsqueda rápida para manuscritos de cientos de miles de palabras.
+- **La biblia se construye sola:** personajes, relaciones, lugares y facciones
+  se extraen del texto y se pueden corregir a mano.
+- **Sin lock-in:** exporta a Markdown, TXT, HTML, DOCX, PDF y EPUB cuando quieras.
+
+<details>
+<summary><strong>Tabla de contenidos</strong></summary>
+
+- [Estado actual](#estado-actual)
+- [Stack tecnológico](#stack-tecnológico)
+- [Desarrollo](#desarrollo)
+- [Documentación](#documentación-de-referencia)
+- [Privacidad y seguridad](#privacidad-y-seguridad)
+- [Licencia](#licencia)
+
+</details>
 
 ---
 
@@ -60,7 +91,7 @@ con CI multiplataforma y checklist de firma/notarización.
 - **Versionado** (snapshots) con detección de cambios por huella SHA-256: guardar, restaurar y eliminar versiones del manuscrito.
 - **Rendimiento**: análisis incremental (no reanaliza si el texto no cambió) e importación con sentencias preparadas.
 - **Estilo** minimalista y elegante (paleta cálida, tipografía serif, modo oscuro).
-- **IA en la nube (opcional)**: OpenAI y Anthropic, **activa por defecto** si configuras una API key; sustituye a Ollama para chat, corrección, enriquecimiento y tipado de relaciones.
+- **IA en la nube (opcional, opt-in)**: OpenAI, Anthropic, Gemini, Groq y Mistral. Requiere configurar una API key **y** marcar explícitamente el consentimiento en Ajustes → IA; sin esa casilla, todo se queda en el equipo.
 - **Chat con contexto (RAG)**: indexa las escenas con embeddings y las inyecta como contexto en el chat.
 - **Enriquecimiento completo de fichas**: genera descripción, biografía, rasgos, objetivos y arco (salida JSON estructurada).
 - **Análisis automático en segundo plano** al marcar un capítulo como «Revisado» o «Final».
@@ -70,7 +101,7 @@ con CI multiplataforma y checklist de firma/notarización.
 
 - **NER con GLiNER2** (`gliner2-rs`): modelo local multilingüe (~1 GB) para detectar personajes con mayor precisión.
 - **Embeddings semánticos** (`fastembed`): descarga ~120 MB la primera vez; mejora la resolución de alias.
-- **Runtime ONNX Runtime**: se descarga e instala automáticamente (con permiso) la primera vez que se activa un motor de IA local.
+- **Runtime ONNX Runtime**: se usa la copia empaquetada con la app si existe; si no, se descarga e instala (con permiso) la primera vez que se activa un motor de IA local. Verificado por SHA-256.
 - **Enriquecimiento con LLM (Ollama o nube)**: genera la ficha completa de personaje (descripción, biografía, rasgos, objetivos y arco).
 - **Diccionarios de ortografía** (Hunspell): se descargan bajo demanda por idioma (pocos MB cada uno).
 - **OCR de imágenes y PDFs escaneados**: requiere Tesseract (+ Poppler para PDFs escaneados).
@@ -102,51 +133,38 @@ con CI multiplataforma y checklist de firma/notarización.
 ## Estructura del repositorio
 
 ```text
-chronotriggerv0/
-├─ README.md
-├─ docs/                        # Plan, requisitos y diseño
-│  ├─ 01-requisitos.md
-│  ├─ 02-arquitectura.md
-│  ├─ 03-ia-local.md
-│  ├─ 04-tts.md
-│  ├─ 05-modelo-de-datos.md
-│  ├─ 06-roadmap.md
-│  ├─ 07-investigacion-ia.md
-│  └─ 08-plan-maestro.md
-├─ src/                         # Frontend Svelte
-│  ├─ routes/
-│  │  ├─ +layout.svelte
-│  │  └─ +page.svelte           # Orquestador (estado + autoguardado)
+Pluma/
+├─ README.md · CHANGELOG.md · LICENSE · PRIVACY.md · SECURITY.md · CONTRIBUTING.md
+├─ .github/
+│  ├─ workflows/ci.yml · release.yml
+│  └─ ISSUE_TEMPLATE/ · PULL_REQUEST_TEMPLATE.md
+├─ docs/                        # Requisitos, arquitectura, IA, release y next steps
+│  ├─ 01-requisitos.md … 11-next-steps.md
+├─ scripts/
+│  ├─ bundle-onnx.sh / .ps1     # Empaqueta ONNX Runtime (verificado por SHA-256)
+│  └─ fetch-models.sh           # Pre-descarga modelos fijados a un commit
+├─ fixtures/sample_narrative.txt
+├─ src/                         # Frontend Svelte 5 + SvelteKit
+│  ├─ routes/+page.svelte       # Orquestador (estado + autoguardado)
 │  ├─ lib/
-│  │  ├─ api.ts                 # Cliente tipado de comandos Tauri
-│  │  ├─ types.ts               # Tipos del dominio
-│  │  ├─ markdown.ts            # Conversión Markdown ↔ HTML
-│  │  └─ components/
-│  │     ├─ Sidebar.svelte      # Navegación (proyectos/capítulos/escenas)
-│  │     ├─ Editor.svelte       # WYSIWYG (TipTap) + barra de herramientas
-│  │     └─ SourceEditor.svelte # Markdown fuente (CodeMirror)
+│  │  ├─ api.ts · types.ts · markdown.ts · theme.ts · fonts.ts
+│  │  └─ components/            # Editor, paneles, World Building, ajustes…
 │  └─ app.css                   # Sistema de diseño
 ├─ src-tauri/                   # Backend Rust (Tauri v2)
-│  ├─ migrations/0001_init.sql  # Esquema SQLite
+│  ├─ entitlements.plist        # macOS hardened runtime
+│  ├─ migrations/               # 0001…0009
+│  ├─ resources/                # ONNX Runtime empaquetado (opcional)
 │  └─ src/
-│     ├─ main.rs                # Punto de entrada
-│     ├─ lib.rs                 # Builder, estado y handlers
-│     ├─ error.rs               # AppError (thiserror + Serialize)
-│     ├─ models.rs              # Project / Chapter / Scene / Character
-│     ├─ db.rs                  # Conexión + migraciones
-│     ├─ repo.rs                # Acceso a datos
-│     ├─ parser.rs              # Parser Markdown → capítulos/escenas/beats
-│     ├─ structure.rs           # Inferencia de estructura (texto plano)
-│     ├─ extract.rs             # Extracción de texto (PDF / DOCX / EPUB / OCR)
-│     ├─ export.rs              # Exportación (md/txt/html/docx/pdf)
-│     ├─ settings.rs            # Configuración de IA (opt-in)
-│     ├─ engines.rs             # Motores de IA (embeddings, NER GLiNER2)
-│     ├─ runtime.rs             # Bootstrap del runtime de ONNX Runtime
-│     ├─ nlp.rs                 # Análisis narrativo (Capa 1)
-│     ├─ llm.rs                 # Enriquecimiento con LLM (Ollama)
-│     ├─ tts.rs                 # Texto a voz
-│     └─ commands.rs            # Comandos @tauri::command
-└─ package.json
+│     ├─ lib.rs · commands.rs   # Builder, handlers y comandos
+│     ├─ db.rs · repo.rs        # SQLite, migraciones y acceso a datos
+│     ├─ models.rs · parser.rs  # Dominio y parser Markdown
+│     ├─ extract.rs · export.rs # Importación/exportación
+│     ├─ nlp.rs · engines.rs    # Análisis, NER y embeddings
+│     ├─ llm.rs · rag.rs        # LLM, chat con contexto
+│     ├─ settings.rs · secrets.rs
+│     ├─ spell.rs · tts.rs
+│     └─ runtime.rs             # Bootstrap de ONNX Runtime
+└─ package.json · svelte.config.js · vite.config.ts
 ```
 
 ---
@@ -156,22 +174,31 @@ chronotriggerv0/
 ```bash
 # Requisitos: Node 20+ (nvm), pnpm y Rust (rustup)
 
-# 1. Instalar dependencias del frontend
-pnpm install
+pnpm install            # dependencias del frontend
+pnpm tauri dev          # desarrollo (frontend + backend)
+pnpm tauri build        # instalador de la plataforma actual
 
-# 2. Ejecutar en modo desarrollo (frontend + backend)
-pnpm tauri dev
+# Verificaciones (lo mismo que ejecuta el CI)
+pnpm check              # TypeScript + Svelte
+pnpm build              # frontend de producción
+cargo test --manifest-path src-tauri/Cargo.toml --lib
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 
-# 3. Compilar / empaquetar para la plataforma actual
-pnpm tauri build
-
-# Verificaciones
-pnpm check      # TypeScript + Svelte
-cargo check     # Rust (desde src-tauri/)
+# Release (opcional)
+./scripts/bundle-onnx.sh       # empaqueta ONNX Runtime (macOS/Linux)
+./scripts/fetch-models.sh      # pre-descarga los modelos fijados
 ```
 
 > La base de datos se crea automáticamente en el directorio de datos de la app
 > (`~/.local/share/com.pluma.app/pluma.db` en Linux, equivalente en macOS/Windows).
+
+> **Linux:** además de Rust y Node, instala las dependencias de Tauri y del
+> llavero:
+>
+> ```bash
+> sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+>   librsvg2-dev patchelf libssl-dev libdbus-1-dev libsecret-1-dev pkg-config
+> ```
 
 ### Requisitos opcionales
 
@@ -181,9 +208,10 @@ cargo check     # Rust (desde src-tauri/)
   En macOS: `brew install tesseract tesseract-lang poppler`.
 - **LLM local (Ollama)**: para el botón "Enriquecer". Instala [Ollama](https://ollama.com) y un
   modelo, p. ej. `ollama pull qwen2.5:1.5b`.
-- **IA local (GLiNER2 / embeddings)**: la app descarga e instala el **runtime de ONNX Runtime**
-  automáticamente (con permiso) la primera vez. Los modelos se descargan bajo demanda:
-  GLiNER2 (~1 GB) y embeddings (~120 MB).
+- **IA local (GLiNER2 / embeddings)**: la app usa la copia empaquetada de **ONNX
+  Runtime** si existe; si no, la descarga e instala (con permiso) la primera vez.
+  Los modelos se descargan bajo demanda: GLiNER2 (~1 GB) y embeddings (~120 MB).
+  Para fijar las revisiones, ejecuta `./scripts/fetch-models.sh`.
 
 ---
 
@@ -202,13 +230,34 @@ cargo check     # Rust (desde src-tauri/)
 | [`docs/09-roadmap-v1.md`](docs/09-roadmap-v1.md) | Roadmap priorizado de V1.0 |
 | [`docs/10-release.md`](docs/10-release.md) | Firma, notarización, updater y checklist de release |
 | [`docs/11-next-steps.md`](docs/11-next-steps.md) | Pasos que requieren credenciales, servidor o decisiones de producto |
-| [`docs/09-roadmap-v1.md`](docs/09-roadmap-v1.md) | **Roadmap priorizado para V1.0**: must-haves, can-waits, secuencia IA/core y plan de 3 sprints |
+
+---
+
+## Privacidad y seguridad
+
+- [Política de privacidad](PRIVACY.md)
+- [Política de seguridad y reporte de vulnerabilidades](SECURITY.md)
+- [Checklist de release y firma](docs/10-release.md)
+
+Por defecto no hay telemetría ni llamadas de red: la base de datos, las copias de
+seguridad y los modelos viven en el equipo. La IA en la nube solo se activa con
+consentimiento explícito.
 
 ---
 
 ## Siguientes pasos
 
 1. **TTS neuronal** — Piper (ver [`docs/04-tts.md`](docs/04-tts.md)).
-2. **Pulido** — atajos de teclado, modo foco, edición de fichas de personaje.
+2. **Pulido** — modo foco, atajos configurables, asociaciones de archivos.
+3. **Distribución** — firma/notarización y updater (ver [`docs/11-next-steps.md`](docs/11-next-steps.md)).
 
 Ver [`docs/06-roadmap.md`](docs/06-roadmap.md) para el detalle completo.
+
+---
+
+## Licencia
+
+MIT © 2026 Pluma. Ver [`LICENSE`](LICENSE).
+
+Si Pluma te resulta útil, una estrella en el repositorio ayuda a que más
+escritores lo encuentren. ✒️

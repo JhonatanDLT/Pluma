@@ -46,7 +46,7 @@ flate2 = "1"
 sha2 = "0.10"
 spellbook = "0.4"
 whatlang = "0.18"
-keyring = "3"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

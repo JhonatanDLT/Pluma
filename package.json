@@ -1,7 +1,7 @@
 {
-  "name": "tauri-app",
+  "name": "pluma",
   "version": "1.0.0",
-  "description": "",
+  "description": "Editor de narrativa literaria local-first con IA opcional.",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -44,5 +44,9 @@
     "svelte-check": "^4.6.0",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
-  }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@12.15.0"
 }

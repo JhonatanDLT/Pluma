@@ -174,6 +174,7 @@ cargo check     # Rust (desde src-tauri/)
 | [`docs/06-roadmap.md`](docs/06-roadmap.md) | Fases e hitos |
 | [`docs/07-investigacion-ia.md`](docs/07-investigacion-ia.md) | Investigación de modelos y algoritmos de IA local |
 | [`docs/08-plan-maestro.md`](docs/08-plan-maestro.md) | Visión de producto, principios y roadmap completo |
+| [`docs/09-roadmap-v1.md`](docs/09-roadmap-v1.md) | **Roadmap priorizado para V1.0**: must-haves, can-waits, secuencia IA/core y plan de 3 sprints |
 
 ---
 

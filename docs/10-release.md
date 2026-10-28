@@ -24,6 +24,20 @@ SmartScreen, y que las actualizaciones lleguen de forma controlada.
 - `cargo test --lib`
 - `cargo check --all-targets`
 
+## 2.1 ONNX Runtime empaquetado
+
+Antes del build de release, ejecutar:
+
+```bash
+./scripts/bundle-onnx.sh        # macOS / Linux
+.\scripts\bundle-onnx.ps1      # Windows
+```
+
+Copia la biblioteca nativa verificada por SHA-256 a `src-tauri/resources/`. Tauri
+la incluye en el bundle y `runtime::prepare` la prefiere sobre la copia
+descargada. En macOS, la dylib se firma junto con la app, lo que permite eliminar
+el entitlement `disable-library-validation`.
+
 ## 3. Firma y notarización
 
 ### macOS

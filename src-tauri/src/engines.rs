@@ -210,7 +210,7 @@ mod tests {
         // --- Después: GLiNER2 (multilingüe, zero-shot) ---
         let home = std::env::var("HOME").unwrap_or_default();
         let data_dir = PathBuf::from(home).join("Library/Application Support/com.pluma.app");
-        crate::runtime::prepare(&data_dir);
+        crate::runtime::prepare(&data_dir, None);
         assert!(
             crate::runtime::is_available(&data_dir),
             "ONNX Runtime no disponible; ejecuta antes ia_install onnxruntime"

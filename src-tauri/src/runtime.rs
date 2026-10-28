@@ -88,22 +88,39 @@ pub fn dylib_path(data_dir: &Path) -> PathBuf {
     runtime_dir(data_dir).join(dylib_filename())
 }
 
-/// Prepara el runtime al arrancar: si ya existe una biblioteca (en el directorio
-/// de datos o junto al ejecutable) y `ORT_DYLIB_PATH` no está definido, lo fija.
-/// Debe ejecutarse **antes** de cargar cualquier modelo.
-pub fn prepare(data_dir: &Path) {
+/// Prepara el runtime al arrancar: si ya existe una biblioteca (empaquetada
+/// dentro de la app, junto al ejecutable o descargada en el directorio de datos)
+/// y `ORT_DYLIB_PATH` no está definido, lo fija. Debe ejecutarse **antes** de
+/// cargar cualquier modelo.
+///
+/// El orden de preferencia es deliberado: primero la copia empaquetada y firmada
+/// con la app (macOS + hardened runtime), luego la del usuario.
+pub fn prepare(data_dir: &Path, resource_dir: Option<&Path>) {
     if std::env::var_os("ORT_DYLIB_PATH").is_some_and(|v| !v.is_empty()) {
         return;
     }
 
-    let candidates = [
-        Some(dylib_path(data_dir)),
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|p| p.join(dylib_filename()))),
-    ];
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
 
-    for candidate in candidates.into_iter().flatten() {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(resources) = resource_dir {
+        // Tauri coloca los recursos en `Contents/Resources` (macOS) o junto al
+        // ejecutable (Linux/Windows). Se cubren ambas estructuras.
+        candidates.push(resources.join(dylib_filename()));
+        candidates.push(resources.join("resources").join(dylib_filename()));
+    }
+    if let Some(dir) = &exe_dir {
+        candidates.push(dir.join(dylib_filename()));
+        // macOS: `Contents/MacOS/pluma` → `Contents/Resources/…`
+        if let Some(contents) = dir.parent() {
+            candidates.push(contents.join("Resources").join(dylib_filename()));
+        }
+    }
+    candidates.push(dylib_path(data_dir));
+
+    for candidate in candidates {
         if candidate.is_file() {
             // Seguro: se ejecuta al arrancar, antes de que `ort` inicialice su
             // entorno y sin concurrencia con otros accesos a variables de entorno.

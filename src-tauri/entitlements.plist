@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    ONNX Runtime se carga dinámicamente en tiempo de ejecución. Si la dylib la
+    firma otro Team ID (Microsoft), el hardened runtime la rechaza. Esta
+    exención es el mal menor cuando no se empaqueta la dylib dentro de la app.
+    La opción recomendada —y la que elimina esta exención— es ejecutar
+    scripts/bundle-onnx.sh antes del build para incluir y firmar la dylib.
+  -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

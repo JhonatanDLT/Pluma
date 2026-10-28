@@ -39,11 +39,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = resolve_data_dir(app.handle())?;
             // Prepara el runtime de ONNX Runtime (fija ORT_DYLIB_PATH si ya está
-            // instalado) antes de que ningún motor pesado intente cargarse.
-            crate::runtime::prepare(&dir);
+            // empaquetado o instalado) antes de que ningún motor pesado se cargue.
+            let resource_dir = app.path().resource_dir().ok();
+            crate::runtime::prepare(&dir, resource_dir.as_deref());
             let db = db::Db::open(&dir.join("pluma.db"))?;
             // Copia automática diaria antes de que el usuario empiece a escribir.
             if let Ok(conn) = db.conn.lock() {

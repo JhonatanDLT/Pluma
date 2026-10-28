@@ -40,6 +40,36 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "resources": ["resources/*"],
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "name": "Markdown",
+        "description": "Documento Markdown",
+        "mimeType": "text/markdown",
+        "role": "Editor"
+      },
+      {
+        "ext": ["txt"],
+        "name": "Texto",
+        "description": "Documento de texto",
+        "mimeType": "text/plain",
+        "role": "Editor"
+      },
+      {
+        "ext": ["docx"],
+        "name": "Word",
+        "description": "Documento de Word",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "role": "Editor"
+      },
+      {
+        "ext": ["epub"],
+        "name": "EPUB",
+        "description": "Libro electrónico",
+        "mimeType": "application/epub+zip",
+        "role": "Editor"
+      }
+    ],
     "macOS": {
       "hardenedRuntime": true,
       "entitlements": "entitlements.plist",

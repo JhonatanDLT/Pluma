@@ -438,6 +438,17 @@ pub fn move_scene(
     repo::move_scene(&conn, &chapter_id, &id, new_position)
 }
 
+/// Archivos abiertos por asociación o línea de comandos, pendientes de procesar
+/// por el frontend. Los consume una sola vez al arrancar.
+#[tauri::command]
+pub fn take_opened_files(state: State<'_, crate::OpenedFiles>) -> Vec<String> {
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::mem::take(&mut *guard)
+}
+
 // ---------------------------------------------------------------------------
 // Copias de seguridad
 // ---------------------------------------------------------------------------

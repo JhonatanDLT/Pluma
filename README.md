@@ -96,6 +96,10 @@ con CI multiplataforma y checklist de firma/notarización.
 - **Enriquecimiento completo de fichas**: genera descripción, biografía, rasgos, objetivos y arco (salida JSON estructurada).
 - **Análisis automático en segundo plano** al marcar un capítulo como «Revisado» o «Final».
 - **Buscar y reemplazar** en el editor (`Ctrl/Cmd+F`).
+- **Modo foco** (`Ctrl/Cmd+Shift+F`) para escribir sin distracciones.
+- **Tipografía del editor** configurable: tamaño, interlineado y ancho de columna.
+- **Proyectos recientes** y **apertura de archivos** por asociación o arrastrando
+  un `.md`, `.txt`, `.docx` o `.epub` sobre la ventana.
 
 ### ⚠️ Opcional (opt-in, descarga bajo demanda)
 
@@ -230,6 +234,7 @@ cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 | [`docs/09-roadmap-v1.md`](docs/09-roadmap-v1.md) | Roadmap priorizado de V1.0 |
 | [`docs/10-release.md`](docs/10-release.md) | Firma, notarización, updater y checklist de release |
 | [`docs/11-next-steps.md`](docs/11-next-steps.md) | Pasos que requieren credenciales, servidor o decisiones de producto |
+| [`docs/12-technical-debt.md`](docs/12-technical-debt.md) | Deuda técnica priorizada (P0–P3) y sprints 4–7 |
 | [`CHANGELOG.md`](CHANGELOG.md) | Historial de cambios |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Licencias de componentes de terceros |
 

@@ -12,11 +12,31 @@
     type CustomFont,
     type FontSlot,
   } from "$lib/fonts";
+  import {
+    DEFAULT_EDITOR_SETTINGS,
+    getEditorSettings,
+    saveEditorSettings,
+    applyEditorSettings,
+    type EditorSettings,
+  } from "$lib/editor";
 
   let theme = $state<ThemeId>(getTheme());
   let settings = $state(getFontSettings());
   let customFonts = $state<CustomFont[]>(getCustomFonts());
   let loadingFont = $state(false);
+  let editor = $state<EditorSettings>(getEditorSettings());
+
+  function updateEditor(patch: Partial<EditorSettings>) {
+    editor = { ...editor, ...patch };
+    saveEditorSettings(editor);
+    applyEditorSettings(editor);
+  }
+
+  function resetEditor() {
+    editor = { ...DEFAULT_EDITOR_SETTINGS };
+    saveEditorSettings(editor);
+    applyEditorSettings(editor);
+  }
 
   const slots: { slot: FontSlot; label: string }[] = [
     { slot: "serif", label: "Texto (serif)" },
@@ -139,6 +159,49 @@
       {/if}
     </div>
   </section>
+
+  <section>
+    <h4>Editor</h4>
+    <p class="hint">Ajusta la página que vas a mirar durante horas.</p>
+
+    <label class="range-field">
+      <span>Tamaño del texto <strong>{editor.fontSize}px</strong></span>
+      <input
+        type="range"
+        min="14"
+        max="26"
+        step="1"
+        value={editor.fontSize}
+        oninput={(e) => updateEditor({ fontSize: Number(e.currentTarget.value) })}
+      />
+    </label>
+
+    <label class="range-field">
+      <span>Interlineado <strong>{editor.lineHeight.toFixed(2)}</strong></span>
+      <input
+        type="range"
+        min="1.3"
+        max="2.2"
+        step="0.05"
+        value={editor.lineHeight}
+        oninput={(e) => updateEditor({ lineHeight: Number(e.currentTarget.value) })}
+      />
+    </label>
+
+    <label class="range-field">
+      <span>Ancho de columna <strong>{editor.measure}px</strong></span>
+      <input
+        type="range"
+        min="520"
+        max="900"
+        step="20"
+        value={editor.measure}
+        oninput={(e) => updateEditor({ measure: Number(e.currentTarget.value) })}
+      />
+    </label>
+
+    <button class="btn" onclick={resetEditor}>Restablecer tipografía del editor</button>
+  </section>
 </div>
 
 <style>
@@ -161,6 +224,25 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--accent);
+  }
+
+  .range-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .range-field strong {
+    color: var(--text);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .range-field input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
   }
 
   .hint {

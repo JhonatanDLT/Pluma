@@ -38,10 +38,12 @@
     content,
     onchange,
     placeholder = "Escribe tu historia…",
+    focus = false,
   }: {
     content: string;
     onchange: (markdown: string) => void;
     placeholder?: string;
+    focus?: boolean;
   } = $props();
 
   let editorEl: HTMLDivElement;
@@ -259,6 +261,7 @@
 </script>
 
 <div class="editor">
+  {#if !focus}
   <div class="ribbon">
   <div class="ribbon-tabs">
     <button class="ribbon-tab" class:active={tab === "inicio"} onclick={() => (tab = "inicio")}>Inicio</button>
@@ -384,6 +387,7 @@
     {/if}
   </div>
 </div>
+  {/if}
 
   {#if findOpen}
     <div class="find-bar">
@@ -559,13 +563,13 @@
   }
 
   :global(.surface .ProseMirror) {
-    max-width: 720px;
+    max-width: var(--editor-measure, 720px);
     margin: 0 auto;
     padding: 40px 0;
     min-height: 100%;
     font-family: var(--font-serif);
-    font-size: 18px;
-    line-height: 1.75;
+    font-size: var(--editor-font-size, 18px);
+    line-height: var(--editor-line-height, 1.75);
     color: var(--text);
   }
 

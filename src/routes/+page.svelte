@@ -16,9 +16,11 @@
     getFontSettings,
     registerCustomFonts,
   } from "$lib/fonts";
+  import { applyEditorSettings, getEditorSettings } from "$lib/editor";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import type {
     ChangeEntry,
     Chapter,
@@ -54,7 +56,31 @@
   let currentScene = $state<Scene | null>(null);
 
   let mode = $state<EditorMode>("wysiwyg");
+  let focusMode = $state(false);
   let saveState = $state<SaveState>("idle");
+
+  const RECENT_KEY = "pluma.recentProjects";
+  let recentIds = $state<string[]>(loadRecentIds());
+
+  function loadRecentIds(): string[] {
+    try {
+      const raw = localStorage.getItem(RECENT_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function rememberProject(id: string) {
+    recentIds = [id, ...recentIds.filter((x) => x !== id)].slice(0, 5);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recentIds));
+    } catch {
+      // Sin localStorage no se persiste, pero la sesión actual funciona.
+    }
+  }
   let journalRecovery = $state<{
     sceneId: string;
     content: string;
@@ -160,6 +186,7 @@
   onMount(() => {
     applyTheme(getTheme());
     applyFontSettings(getFontSettings());
+    applyEditorSettings(getEditorSettings());
     registerCustomFonts();
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => {
@@ -176,6 +203,44 @@
     return () => {
       unlisten.then((fn) => fn());
     };
+  });
+
+  // Asociaciones de archivos: macOS emite `open-file`; Windows/Linux pasan la
+  // ruta por línea de comandos y se recoge con `take_opened_files`.
+  onMount(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string[]>("open-file", (e) => {
+      void openExternalFiles(e.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    void api
+      .takeOpenedFiles()
+      .then((paths) => {
+        if (paths.length > 0) void openExternalFiles(paths);
+      })
+      .catch(() => {});
+    return () => unlisten?.();
+  });
+
+  // Drag-and-drop de archivos sobre la ventana.
+  onMount(() => {
+    let unlisten: (() => void) | undefined;
+    try {
+      getCurrentWebview()
+        .onDragDropEvent((event) => {
+          if (event.payload.type === "drop" && event.payload.paths.length > 0) {
+            void openExternalFiles(event.payload.paths);
+          }
+        })
+        .then((fn) => {
+          unlisten = fn;
+        })
+        .catch(() => {});
+    } catch {
+      // Fuera de Tauri (p. ej. `pnpm dev` en navegador) no hay drag-drop nativo.
+    }
+    return () => unlisten?.();
   });
 
   // Flush de seguridad al cerrar la ventana: evita perder los últimos 600 ms
@@ -212,6 +277,21 @@
   onMount(() => {
     function onKey(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        focusMode = !focusMode;
+        return;
+      }
+      if (
+        e.key === "Escape" &&
+        focusMode &&
+        !worldOpen &&
+        !switcherOpen &&
+        !spellOpen
+      ) {
+        focusMode = false;
+        return;
+      }
       if (mod && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void flushSave().then(() => {
@@ -261,6 +341,19 @@
     projects = await api.listProjects();
   }
 
+  /// Importa un archivo abierto desde el sistema (doble clic o drag-and-drop)
+  /// como un proyecto nuevo y lo selecciona.
+  async function openExternalFiles(paths: string[]) {
+    if (paths.length === 0) return;
+    try {
+      const project = await api.importFileAsProject(paths[0], null, null, null, null);
+      projects = await api.listProjects();
+      await selectProject(project.id);
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
   function countWords(markdown: string): number {
     const text = markdown.replace(/[#*_>`~\-\[\]()!|]/g, " ");
     return text.split(/\s+/).filter(Boolean).length;
@@ -279,6 +372,7 @@
     if (id === selectedProjectId) return;
     await flushSave();
     selectedProjectId = id;
+    rememberProject(id);
     selectedChapterId = null;
     selectedSceneId = null;
     sceneContent = "";
@@ -511,6 +605,12 @@
     if (answer?.trim() !== title) return;
     try {
       await api.deleteProject(id);
+      recentIds = recentIds.filter((x) => x !== id);
+      try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify(recentIds));
+      } catch {
+        // Sin localStorage no hay nada que limpiar.
+      }
       if (selectedProjectId === id) {
         await flushSave();
         selectedProjectId = null;
@@ -1309,6 +1409,7 @@
   {#if !selectedProjectId}
     <ProjectsView
       {projects}
+      {recentIds}
       focusSignal={projectsFocusSignal}
       onselectproject={selectProject}
       oncreateproject={createProject}
@@ -1318,8 +1419,8 @@
       onimportproject={importProject}
     />
   {:else}
-    <div class="workspace">
-      {#if !chaptersCollapsed}
+    <div class="workspace" class:focus={focusMode}>
+      {#if !focusMode && !chaptersCollapsed}
         <aside class="panel" style:width="{chaptersWidth}px">
           <ChaptersPanel
             {chapters}
@@ -1346,7 +1447,7 @@
         <button class="collapsed-tab" onclick={() => (chaptersCollapsed = false)}>{selectedProject?.level1_name ?? "Capítulos"}</button>
       {/if}
 
-      {#if viewMode === "split"}
+      {#if !focusMode && viewMode === "split"}
         {#if !scenesCollapsed}
           <aside class="panel" style:width="{scenesWidth}px">
             <ScenesPanel
@@ -1474,6 +1575,15 @@
             onclick={() => (viewMode = "tree")}
           >Árbol</button>
         </div>
+
+        <button
+          class="btn-icon focus-exit"
+          title={focusMode
+            ? "Salir del modo foco (Esc)"
+            : "Modo foco (Ctrl/Cmd+Shift+F)"}
+          aria-label={focusMode ? "Salir del modo foco" : "Activar modo foco"}
+          onclick={() => (focusMode = !focusMode)}
+        >{focusMode ? "⤢" : "⛶"}</button>
       </div>
     </header>
 
@@ -1513,7 +1623,7 @@
       {#if selectedSceneId}
         {#key `${selectedSceneId}-${editorRevision}`}
           {#if mode === "wysiwyg"}
-            <Editor content={sceneContent} onchange={onContentChange} />
+            <Editor content={sceneContent} onchange={onContentChange} focus={focusMode} />
           {:else}
             <SourceEditor content={sceneContent} onchange={onContentChange} />
           {/if}
@@ -1537,7 +1647,7 @@
     </div>
   </main>
 
-      {#if optionsOpen}
+      {#if !focusMode && optionsOpen}
         <button class="divider" type="button" aria-label="Ajustar ancho" onmousedown={() => beginDrag("options")}></button>
         <aside class="panel panel-right" style:width="{optionsWidth}px">
           <OptionsPanel
@@ -1725,6 +1835,28 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  .workspace.focus .top-actions > * {
+    display: none;
+  }
+
+  .workspace.focus .top-actions > .wordcount,
+  .workspace.focus .top-actions > .save-status {
+    display: inline;
+  }
+
+  .workspace.focus .top-actions > .focus-exit {
+    display: inline-flex;
+  }
+
+  .workspace.focus .crumbs .btn-icon {
+    display: none;
+  }
+
+  .workspace.focus .topbar {
+    background: var(--bg);
+    border-bottom-color: transparent;
   }
 
   .tts-voice {

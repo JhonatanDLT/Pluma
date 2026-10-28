@@ -4,6 +4,18 @@ Todas las versiones notables de Pluma. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado
 semántico.
 
+## [Unreleased]
+
+### Añadido
+
+- **Modo foco** (`Ctrl/Cmd+Shift+F`): oculta paneles y ribbon, y se sale con
+  `Esc`.
+- **Tipografía del editor** configurable: tamaño, interlineado y ancho de
+  columna, persistentes y compartidos por WYSIWYG y Markdown.
+- **Proyectos recientes**: los últimos cinco se marcan en la vista de proyectos.
+- **Apertura de archivos** por asociación (`.md`, `.txt`, `.docx`, `.epub`) y
+  por drag-and-drop sobre la ventana.
+
 ## [1.0.0] — 2026-10-28
 
 Primera versión release candidate. Enfoque en **confianza**: que el manuscrito

@@ -6,6 +6,7 @@
 
   let {
     projects,
+    recentIds = [],
     focusSignal = 0,
     onselectproject,
     oncreateproject,
@@ -15,6 +16,7 @@
     onsampleproject,
   }: {
     projects: Project[];
+    recentIds?: string[];
     focusSignal?: number;
     onselectproject: (id: string) => void;
     oncreateproject: (
@@ -165,7 +167,12 @@
               {:else}
                 <span class="card-cover card-cover-empty">✒</span>
               {/if}
-              <span class="card-title">{project.title}</span>
+              <span class="card-title">
+                {project.title}
+                {#if recentIds.includes(project.id)}
+                  <span class="card-recent">Reciente</span>
+                {/if}
+              </span>
               {#if project.description}
                 <span class="card-desc">{project.description}</span>
               {/if}
@@ -363,6 +370,22 @@
     font-weight: 600;
     color: var(--text);
     padding: 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .card-recent {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 6px;
+    border-radius: 999px;
   }
 
   .card-desc {

@@ -222,6 +222,9 @@ export const iaApplyProfile = (profile: string) =>
 // Copias de seguridad
 export const backupDatabase = () => invoke<string>("backup_database");
 
+// Archivos abiertos por asociación de archivos o línea de comandos
+export const takeOpenedFiles = () => invoke<string[]>("take_opened_files");
+
 // Texto a voz
 export const ttsSpeak = (text: string, voice: string | null, rate: number) =>
   invoke<void>("tts_speak", { text, voice, rate });

@@ -20,9 +20,14 @@ mod tts;
 
 use std::path::PathBuf;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub use error::{AppError, Result};
+
+/// Archivos abiertos por asociación (macOS) o por línea de comandos
+/// (Windows/Linux). El frontend los consume al arrancar con `take_opened_files`.
+#[derive(Default)]
+pub struct OpenedFiles(pub std::sync::Mutex<Vec<String>>);
 
 /// Resuelve el directorio de datos de la aplicación, creándolo si es necesario.
 fn resolve_data_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
@@ -53,6 +58,19 @@ pub fn run() {
             }
             app.manage(db);
             app.manage(crate::engines::ModelCache::new());
+
+            // Archivos pasados por línea de comandos (Windows/Linux). En macOS
+            // llegan por `RunEvent::Opened` y se añaden al mismo estado.
+            let opened = OpenedFiles::default();
+            if let Ok(mut guard) = opened.0.lock() {
+                for arg in std::env::args().skip(1) {
+                    let path = std::path::Path::new(&arg);
+                    if path.is_file() {
+                        guard.push(path.to_string_lossy().into_owned());
+                    }
+                }
+            }
+            app.manage(opened);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -114,7 +132,30 @@ pub fn run() {
             commands::tts_speak,
             commands::tts_stop,
             commands::tts_list_voices,
+            commands::take_opened_files,
         ])
-        .run(tauri::generate_context!())
-        .expect("error al ejecutar la aplicación Tauri");
+        .build(tauri::generate_context!())
+        .expect("error al construir la aplicación Tauri")
+        .run(|app, event| {
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+            {
+                if let tauri::RunEvent::Opened { urls } = event {
+                    if let Some(state) = app.try_state::<OpenedFiles>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            for url in urls {
+                                if let Ok(path) = url.to_file_path() {
+                                    let path = path.to_string_lossy().into_owned();
+                                    guard.push(path.clone());
+                                    let _ = app.emit("open-file", vec![path]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+            {
+                let _ = (app, event);
+            }
+        });
 }

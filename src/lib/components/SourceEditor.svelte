@@ -19,15 +19,15 @@
   const theme = EditorView.theme({
     "&": {
       height: "100%",
-      fontSize: "15px",
+      fontSize: "calc(var(--editor-font-size, 18px) - 3px)",
       backgroundColor: "transparent",
       color: "var(--text)",
     },
     ".cm-content": {
       fontFamily: "var(--font-mono)",
-      lineHeight: "1.7",
+      lineHeight: "var(--editor-line-height, 1.7)",
       padding: "40px 0 96px",
-      maxWidth: "760px",
+      maxWidth: "var(--editor-measure, 760px)",
       margin: "0 auto",
       caretColor: "var(--accent)",
     },

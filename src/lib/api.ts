@@ -31,6 +31,10 @@ export const renameProject = (id: string, title: string) =>
   invoke<Project>("rename_project", { id, title });
 export const deleteProject = (id: string) =>
   invoke<void>("delete_project", { id });
+export const duplicateProject = (projectId: string) =>
+  invoke<Project>("duplicate_project", { projectId });
+export const createSampleProject = () =>
+  invoke<Project>("create_sample_project");
 export const updateProjectGoal = (id: string, goal: number) =>
   invoke<Project>("update_project_goal", { id, goal });
 export const updateProjectMeta = (
@@ -132,8 +136,46 @@ export const listEntities = (projectId: string) =>
   invoke<Entity[]>("list_entities", { projectId });
 export const deleteCharacter = (id: string) =>
   invoke<void>("delete_character", { id });
+export const updateCharacter = (
+  id: string,
+  name: string,
+  aliases: string[],
+  role: string | null,
+  description: string | null,
+  biography: string | null,
+  traits: string[],
+  goals: string[],
+  arc: string | null,
+  color: string | null,
+) =>
+  invoke<void>("update_character", {
+    id,
+    name,
+    aliases,
+    role,
+    description,
+    biography,
+    traits,
+    goals,
+    arc,
+    color,
+  });
 export const deleteEntity = (id: string) =>
   invoke<void>("delete_entity", { id });
+export const updateEntity = (
+  id: string,
+  name: string,
+  entityType: string,
+  aliases: string[],
+  description: string | null,
+) =>
+  invoke<void>("update_entity", {
+    id,
+    name,
+    entityType,
+    aliases,
+    description,
+  });
 export const analyzeProject = (projectId: string, chapterId: string | null) =>
   invoke<AnalysisReport>("analyze_project", { projectId, chapterId });
 export const enrichProject = (projectId: string, model: string | null) =>
@@ -184,3 +226,5 @@ export const backupDatabase = () => invoke<string>("backup_database");
 export const ttsSpeak = (text: string, voice: string | null, rate: number) =>
   invoke<void>("tts_speak", { text, voice, rate });
 export const ttsStop = () => invoke<void>("tts_stop");
+export const ttsListVoices = () =>
+  invoke<{ name: string; locale: string }[]>("tts_list_voices");

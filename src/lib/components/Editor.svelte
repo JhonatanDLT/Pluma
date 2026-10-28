@@ -560,7 +560,6 @@
     margin: 0 auto;
     padding: 40px 0;
     min-height: 100%;
-    outline: none;
     font-family: var(--font-serif);
     font-size: 18px;
     line-height: 1.75;

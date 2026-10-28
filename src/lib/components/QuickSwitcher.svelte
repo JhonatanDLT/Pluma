@@ -180,7 +180,6 @@
     border: none;
     background: transparent;
     color: var(--text);
-    outline: none;
   }
 
   .switcher-kbd {

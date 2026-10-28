@@ -55,6 +55,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_projects,
             commands::create_project,
+            commands::create_sample_project,
+            commands::duplicate_project,
             commands::rename_project,
             commands::delete_project,
             commands::update_project_goal,
@@ -82,8 +84,10 @@ pub fn run() {
             commands::persist_image,
             commands::list_characters,
             commands::list_relationships,
+            commands::update_character,
             commands::delete_character,
             commands::list_entities,
+            commands::update_entity,
             commands::delete_entity,
             commands::analyze_project,
             commands::enrich_project,
@@ -106,6 +110,7 @@ pub fn run() {
             commands::ia_install,
             commands::tts_speak,
             commands::tts_stop,
+            commands::tts_list_voices,
         ])
         .run(tauri::generate_context!())
         .expect("error al ejecutar la aplicación Tauri");

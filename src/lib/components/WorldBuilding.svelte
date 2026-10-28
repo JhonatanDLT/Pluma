@@ -13,6 +13,8 @@
     onenrich,
     ondeletecharacter,
     ondeleteentity,
+    onupdatecharacter,
+    onupdateentity,
     onclose,
   }: {
     characters: Character[];
@@ -26,6 +28,8 @@
     onenrich: () => void;
     ondeletecharacter: (id: string) => void;
     ondeleteentity: (id: string) => void;
+    onupdatecharacter: (character: Character) => void | Promise<void>;
+    onupdateentity: (entity: Entity) => void | Promise<void>;
     onclose: () => void;
   } = $props();
 
@@ -33,6 +37,84 @@
   let tab = $state<Tab>("characters");
   let selectedCharacterId = $state<string | null>(null);
   let search = $state("");
+
+  let editingCharacter = $state<Character | null>(null);
+  let editingEntity = $state<Entity | null>(null);
+  let form = $state({
+    name: "",
+    role: "",
+    aliases: "",
+    description: "",
+    biography: "",
+    traits: "",
+    goals: "",
+    arc: "",
+    color: "",
+    entityType: "location",
+  });
+
+  function splitList(value: string): string[] {
+    return value
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+
+  function startEditCharacter(c: Character) {
+    editingCharacter = c;
+    form = {
+      name: c.name,
+      role: c.role ?? "",
+      aliases: c.aliases.join(", "),
+      description: c.description ?? "",
+      biography: c.biography ?? "",
+      traits: c.traits.join(", "),
+      goals: c.goals.join(", "),
+      arc: c.arc ?? "",
+      color: c.color ?? "",
+      entityType: "location",
+    };
+  }
+
+  function startEditEntity(e: Entity) {
+    editingEntity = e;
+    form = {
+      ...form,
+      name: e.name,
+      aliases: e.aliases.join(", "),
+      description: e.description ?? "",
+      entityType: e.entity_type,
+    };
+  }
+
+  async function saveCharacter() {
+    if (!editingCharacter) return;
+    await onupdatecharacter({
+      ...editingCharacter,
+      name: form.name.trim(),
+      role: form.role.trim() || null,
+      aliases: splitList(form.aliases),
+      description: form.description.trim() || null,
+      biography: form.biography.trim() || null,
+      traits: splitList(form.traits),
+      goals: splitList(form.goals),
+      arc: form.arc.trim() || null,
+      color: form.color.trim() || null,
+    });
+    editingCharacter = null;
+  }
+
+  async function saveEntity() {
+    if (!editingEntity) return;
+    await onupdateentity({
+      ...editingEntity,
+      name: form.name.trim(),
+      entity_type: form.entityType,
+      aliases: splitList(form.aliases),
+      description: form.description.trim() || null,
+    });
+    editingEntity = null;
+  }
 
   const locations = $derived(entities.filter((e) => e.entity_type === "location"));
   const factions = $derived(entities.filter((e) => e.entity_type === "faction"));
@@ -206,7 +288,15 @@
 
             <div class="wb-detail">
               {#if selectedCharacter}
-                <h3>{selectedCharacter.name}</h3>
+                <div class="wb-detail-head">
+                  <h3>{selectedCharacter.name}</h3>
+                  <button
+                    class="btn"
+                    onclick={() => startEditCharacter(selectedCharacter)}
+                  >
+                    Editar ficha
+                  </button>
+                </div>
                 {#if selectedCharacter.role}
                   <span class="wb-role">{selectedCharacter.role}</span>
                 {/if}
@@ -302,6 +392,11 @@
                 </div>
                 <button
                   class="btn-icon"
+                  title="Editar"
+                  onclick={() => startEditEntity(e)}
+                >✎</button>
+                <button
+                  class="btn-icon"
                   title="Eliminar"
                   onclick={() => ondeleteentity(e.id)}
                 >×</button>
@@ -324,6 +419,83 @@
         {/if}
       {/if}
     </div>
+
+    {#if editingCharacter}
+      <div
+        class="wb-edit-overlay"
+        role="presentation"
+        tabindex="-1"
+        onclick={() => (editingCharacter = null)}
+        onkeydown={(e) => {
+          if (e.key === "Escape") editingCharacter = null;
+        }}
+      >
+        <div
+          class="wb-edit"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Editar personaje"
+          tabindex="-1"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => e.stopPropagation()}
+        >
+          <h3>Editar personaje</h3>
+          <label>Nombre<input class="input" bind:value={form.name} /></label>
+          <label>
+            Rol
+            <input class="input" bind:value={form.role} placeholder="protagonista, antagonista…" />
+          </label>
+          <label>Alias (separados por comas)<input class="input" bind:value={form.aliases} /></label>
+          <label>Descripción<textarea class="input" bind:value={form.description} rows="2"></textarea></label>
+          <label>Biografía<textarea class="input" bind:value={form.biography} rows="3"></textarea></label>
+          <label>Rasgos (separados por comas)<input class="input" bind:value={form.traits} /></label>
+          <label>Objetivos (separados por comas)<input class="input" bind:value={form.goals} /></label>
+          <label>Arco<textarea class="input" bind:value={form.arc} rows="2"></textarea></label>
+          <div class="wb-edit-actions">
+            <button class="btn" onclick={() => (editingCharacter = null)}>Cancelar</button>
+            <button class="btn btn-primary" onclick={saveCharacter}>Guardar</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if editingEntity}
+      <div
+        class="wb-edit-overlay"
+        role="presentation"
+        tabindex="-1"
+        onclick={() => (editingEntity = null)}
+        onkeydown={(e) => {
+          if (e.key === "Escape") editingEntity = null;
+        }}
+      >
+        <div
+          class="wb-edit"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Editar entidad"
+          tabindex="-1"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => e.stopPropagation()}
+        >
+          <h3>Editar entidad</h3>
+          <label>Nombre<input class="input" bind:value={form.name} /></label>
+          <label>
+            Tipo
+            <select class="input" bind:value={form.entityType}>
+              <option value="location">Lugar</option>
+              <option value="faction">Facción</option>
+            </select>
+          </label>
+          <label>Alias (separados por comas)<input class="input" bind:value={form.aliases} /></label>
+          <label>Descripción<textarea class="input" bind:value={form.description} rows="3"></textarea></label>
+          <div class="wb-edit-actions">
+            <button class="btn" onclick={() => (editingEntity = null)}>Cancelar</button>
+            <button class="btn btn-primary" onclick={saveEntity}>Guardar</button>
+          </div>
+        </div>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -693,5 +865,61 @@
 
   .wb-link:hover {
     color: var(--accent-hover);
+  }
+
+  .wb-detail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .wb-edit-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--overlay, rgb(0 0 0 / 0.42));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    padding: 24px;
+  }
+
+  .wb-edit {
+    width: min(520px, 100%);
+    max-height: 85vh;
+    overflow-y: auto;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg, 0 16px 48px rgb(0 0 0 / 0.25));
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .wb-edit h3 {
+    margin: 0 0 4px;
+  }
+
+  .wb-edit label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary, var(--text-muted));
+  }
+
+  .wb-edit textarea.input {
+    resize: vertical;
+    font-family: inherit;
+  }
+
+  .wb-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
   }
 </style>

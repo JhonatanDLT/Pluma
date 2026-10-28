@@ -11,6 +11,8 @@
     oncreateproject,
     ondeleteproject,
     onimportproject,
+    onduplicateproject,
+    onsampleproject,
   }: {
     projects: Project[];
     focusSignal?: number;
@@ -23,6 +25,8 @@
       coverPath: string | null,
     ) => void;
     ondeleteproject: (id: string) => void;
+    onduplicateproject: (id: string) => void;
+    onsampleproject: () => void;
     onimportproject: (
       path: string,
       author: string | null,
@@ -132,6 +136,7 @@
       <h2>Tus novelas</h2>
       <div class="head-actions">
         <button class="btn" onclick={backup} title="Crear una copia de seguridad de la base de datos">Copia</button>
+        <button class="btn" onclick={onsampleproject} title="Crear un proyecto de demostración">Ejemplo</button>
         <button class="btn" onclick={openImport} title="Importar un PDF, EPUB, DOCX o TXT como proyecto">Importar</button>
         <button class="btn btn-primary" onclick={openCreate}>＋ Nuevo proyecto</button>
       </div>
@@ -165,6 +170,7 @@
                 <span class="card-desc">{project.description}</span>
               {/if}
             </button>
+            <button class="card-dup" title="Duplicar proyecto" onclick={() => onduplicateproject(project.id)}>⧉</button>
             <button class="card-del" title="Eliminar proyecto" onclick={() => ondeleteproject(project.id)}>×</button>
           </li>
         {/each}
@@ -391,6 +397,29 @@
 
   .card-del:hover {
     background: var(--danger);
+  }
+
+  .card-dup {
+    position: absolute;
+    top: 8px;
+    right: 44px;
+    display: none;
+    border: none;
+    background: rgba(0, 0, 0, 0.35);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+    padding: 4px 7px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .project-grid li:hover .card-dup {
+    display: block;
+  }
+
+  .card-dup:hover {
+    background: var(--accent);
   }
 
   .form-overlay {

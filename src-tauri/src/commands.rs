@@ -171,6 +171,44 @@ pub fn rename_project(db: State<'_, Db>, id: String, title: String) -> Result<Pr
 }
 
 #[tauri::command]
+pub fn duplicate_project(db: State<'_, Db>, project_id: String) -> Result<Project> {
+    let mut guard = lock(&db)?;
+    repo::duplicate_project(&mut *guard, &project_id)
+}
+
+/// Crea un proyecto de demostración con capítulos y escenas para que un usuario
+/// nuevo pueda explorar la interfaz sin escribir desde cero.
+#[tauri::command]
+pub fn create_sample_project(db: State<'_, Db>) -> Result<Project> {
+    let markdown = r#"# Capítulo 1: El despertar
+## La llegada
+Elena llegó al puerto de Vela al amanecer. El viento olía a sal y a tormenta, y las gaviotas gritaban sobre los tejados mojados. Llevaba tres días sin dormir y una carta sin abrir en el bolsillo.
+
+## El encuentro
+En la taberna, un desconocido la observaba desde la sombra. Tenía los ojos de quien ha visto demasiadas veces el mismo final.
+
+# Capítulo 2: La travesía
+## El mapa
+El capitán desplegó el mapa sobre la mesa. La tinta se había corrido en el borde, justo donde la costa se convertía en leyenda.
+"#;
+    let manuscript = parser::parse(markdown);
+    let mut guard = lock(&db)?;
+    let project = repo::create_project(
+        &guard,
+        "Novela de ejemplo",
+        Some("Pluma".to_string()),
+        50_000,
+        Some(
+            "Un proyecto de demostración para explorar Pluma: capítulos, escenas, biblia y análisis."
+                .to_string(),
+        ),
+        None,
+    )?;
+    repo::import_manuscript(&mut *guard, &project.id, &manuscript)?;
+    Ok(project)
+}
+
+#[tauri::command]
 pub fn delete_project(db: State<'_, Db>, id: String) -> Result<()> {
     let conn = lock(&db)?;
     repo::delete_project(&conn, &id)
@@ -501,6 +539,37 @@ pub fn delete_character(db: State<'_, Db>, id: String) -> Result<()> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn update_character(
+    db: State<'_, Db>,
+    id: String,
+    name: String,
+    aliases: Vec<String>,
+    role: Option<String>,
+    description: Option<String>,
+    biography: Option<String>,
+    traits: Vec<String>,
+    goals: Vec<String>,
+    arc: Option<String>,
+    color: Option<String>,
+) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::update_character(
+        &conn,
+        &id,
+        &name,
+        &aliases,
+        role.as_deref(),
+        description.as_deref(),
+        biography.as_deref(),
+        &traits,
+        &goals,
+        arc.as_deref(),
+        color.as_deref(),
+    )
+}
+
+#[tauri::command]
 pub fn list_entities(db: State<'_, Db>, project_id: String) -> Result<Vec<Entity>> {
     let conn = lock(&db)?;
     repo::list_entities(&conn, &project_id)
@@ -510,6 +579,26 @@ pub fn list_entities(db: State<'_, Db>, project_id: String) -> Result<Vec<Entity
 pub fn delete_entity(db: State<'_, Db>, id: String) -> Result<()> {
     let conn = lock(&db)?;
     repo::delete_entity(&conn, &id)
+}
+
+#[tauri::command]
+pub fn update_entity(
+    db: State<'_, Db>,
+    id: String,
+    name: String,
+    entity_type: String,
+    aliases: Vec<String>,
+    description: Option<String>,
+) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::update_entity(
+        &conn,
+        &id,
+        &name,
+        &entity_type,
+        &aliases,
+        description.as_deref(),
+    )
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -1175,4 +1264,9 @@ pub fn tts_speak(voice: Option<String>, rate: Option<f32>, text: String) -> Resu
 #[tauri::command]
 pub fn tts_stop() -> Result<()> {
     tts::stop()
+}
+
+#[tauri::command]
+pub fn tts_list_voices() -> Result<Vec<tts::VoiceInfo>> {
+    tts::list_voices()
 }

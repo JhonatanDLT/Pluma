@@ -55,6 +55,11 @@
 
   let mode = $state<EditorMode>("wysiwyg");
   let saveState = $state<SaveState>("idle");
+  let journalRecovery = $state<{
+    sceneId: string;
+    content: string;
+    at: number;
+  } | null>(null);
   let errorMsg = $state<string | null>(null);
   let importing = $state(false);
   let analyzing = $state(false);
@@ -149,6 +154,7 @@
     await loadIaStatus();
     await loadCloudProviders();
     await loadProfiles();
+    await loadTtsVoices();
   });
 
   onMount(() => {
@@ -307,11 +313,29 @@
   async function selectScene(id: string) {
     if (id === selectedSceneId) return;
     await flushSave();
+    journalRecovery = null;
     const scene = await api.getScene(id);
     sceneContent = scene.content_markdown;
     sceneTitle = scene.title;
     currentScene = scene;
     selectedSceneId = id;
+
+    // Diario de recuperación: si hay contenido local más reciente que la
+    // versión guardada (cierre inesperado), se ofrece recuperarlo.
+    try {
+      const raw = localStorage.getItem(journalKey(id));
+      if (raw) {
+        const entry = JSON.parse(raw) as { content: string; at: number };
+        const savedAt = new Date(scene.updated_at).getTime();
+        if (entry.content !== scene.content_markdown && entry.at > savedAt) {
+          journalRecovery = { sceneId: id, content: entry.content, at: entry.at };
+        } else {
+          clearJournal(id);
+        }
+      }
+    } catch {
+      // Diario corrupto o localStorage no disponible: se ignora.
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -452,6 +476,26 @@
       const scene = await api.createScene(selectedChapterId, title);
       scenes = await api.listScenes(selectedChapterId);
       await selectScene(scene.id);
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function duplicateProject(id: string) {
+    try {
+      const project = await api.duplicateProject(id);
+      projects = await api.listProjects();
+      await selectProject(project.id);
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function createSampleProject() {
+    try {
+      const project = await api.createSampleProject();
+      projects = await api.listProjects();
+      await selectProject(project.id);
     } catch (e) {
       reportError(e);
     }
@@ -761,6 +805,47 @@
     }
   }
 
+  async function updateCharacter(character: Character) {
+    try {
+      await api.updateCharacter(
+        character.id,
+        character.name,
+        character.aliases,
+        character.role,
+        character.description,
+        character.biography,
+        character.traits,
+        character.goals,
+        character.arc,
+        character.color,
+      );
+      if (selectedProjectId) {
+        characters = await api.listCharacters(selectedProjectId);
+      }
+      logChange(`Personaje actualizado: ${character.name}`);
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function updateEntity(entity: Entity) {
+    try {
+      await api.updateEntity(
+        entity.id,
+        entity.name,
+        entity.entity_type,
+        entity.aliases,
+        entity.description,
+      );
+      if (selectedProjectId) {
+        entities = await api.listEntities(selectedProjectId);
+      }
+      logChange(`Entidad actualizada: ${entity.name}`);
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
   async function deleteCharacter(id: string) {
     if (!window.confirm("¿Eliminar este personaje de la biblia?")) return;
     try {
@@ -973,10 +1058,23 @@
   // Texto a voz
   // -------------------------------------------------------------------------
 
+  let ttsVoices = $state<{ name: string; locale: string }[]>([]);
+  let ttsVoice = $state<string>("");
+
+  async function loadTtsVoices() {
+    try {
+      ttsVoices = await api.ttsListVoices();
+      const spanish = ttsVoices.find((v) => v.locale.startsWith("es"));
+      if (spanish) ttsVoice = spanish.name;
+    } catch {
+      // TTS es opcional: si el sistema no expone voces, se usa la default.
+    }
+  }
+
   async function playTts() {
     if (!selectedSceneId) return;
     try {
-      await api.ttsSpeak(sceneContent, null, 1.0);
+      await api.ttsSpeak(sceneContent, ttsVoice || null, 1.0);
     } catch (e) {
       reportError(e);
     }
@@ -1101,8 +1199,34 @@
   // Autoguardado
   // -------------------------------------------------------------------------
 
+  const JOURNAL_PREFIX = "pluma.journal.";
+
+  function journalKey(id: string): string {
+    return `${JOURNAL_PREFIX}${id}`;
+  }
+
+  function writeJournal(id: string, content: string) {
+    try {
+      localStorage.setItem(
+        journalKey(id),
+        JSON.stringify({ content, at: Date.now() }),
+      );
+    } catch {
+      // localStorage lleno o no disponible: el autoguardado sigue funcionando.
+    }
+  }
+
+  function clearJournal(id: string) {
+    try {
+      localStorage.removeItem(journalKey(id));
+    } catch {
+      // Sin localStorage no hay diario que limpiar.
+    }
+  }
+
   function onContentChange(markdown: string) {
     sceneContent = markdown;
+    if (selectedSceneId) writeJournal(selectedSceneId, markdown);
     scheduleSave();
   }
 
@@ -1121,6 +1245,7 @@
     try {
       await api.saveScene(id, sceneContent);
       if (selectedSceneId === id) saveState = "saved";
+      clearJournal(id);
       return true;
     } catch (e) {
       console.error(e);
@@ -1154,6 +1279,8 @@
       onselectproject={selectProject}
       oncreateproject={createProject}
       ondeleteproject={deleteProject}
+      onduplicateproject={duplicateProject}
+      onsampleproject={createSampleProject}
       onimportproject={importProject}
     />
   {:else}
@@ -1222,6 +1349,14 @@
 
       <div class="top-actions">
         {#if selectedSceneId}
+          {#if ttsVoices.length > 0}
+            <select class="tts-voice" bind:value={ttsVoice} title="Voz del sistema">
+              <option value="">Voz por defecto</option>
+              {#each ttsVoices.filter((v) => v.locale.startsWith("es")) as voice}
+                <option value={voice.name}>{voice.name}</option>
+              {/each}
+            </select>
+          {/if}
           <button class="btn-icon" title="Reproducir" onclick={playTts}>▶</button>
           <button class="btn-icon" title="Detener" onclick={stopTts}>■</button>
           <button
@@ -1311,6 +1446,31 @@
     {/if}
 
     <div class="editor-area">
+      {#if journalRecovery}
+        <div class="journal-banner" role="status">
+          <span>
+            Hay cambios sin guardar de esta escena
+            ({new Date(journalRecovery.at).toLocaleTimeString()}).
+          </span>
+          <button
+            class="btn"
+            onclick={() => {
+              if (!journalRecovery) return;
+              sceneContent = journalRecovery.content;
+              journalRecovery = null;
+              onContentChange(sceneContent);
+            }}
+          >Recuperar</button>
+          <button
+            class="btn"
+            onclick={() => {
+              if (!journalRecovery) return;
+              clearJournal(journalRecovery.sceneId);
+              journalRecovery = null;
+            }}
+          >Descartar</button>
+        </div>
+      {/if}
       {#if selectedSceneId}
         {#key `${selectedSceneId}-${editorRevision}`}
           {#if mode === "wysiwyg"}
@@ -1401,6 +1561,8 @@
       onenrich={enrich}
       ondeletecharacter={deleteCharacter}
       ondeleteentity={deleteEntity}
+      onupdatecharacter={updateCharacter}
+      onupdateentity={updateEntity}
       onclose={() => (worldOpen = false)}
     />
   {/if}
@@ -1525,6 +1687,17 @@
     flex-shrink: 0;
   }
 
+  .tts-voice {
+    max-width: 120px;
+    padding: 4px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+  }
+
   .wordcount {
     font-size: 12px;
     color: var(--text-muted);
@@ -1618,6 +1791,21 @@
     color: var(--accent);
     border-bottom: 1px solid var(--border);
     font-size: 13px;
+  }
+
+  .journal-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: var(--accent-soft);
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .journal-banner span {
+    flex: 1;
   }
 
   .editor-area {

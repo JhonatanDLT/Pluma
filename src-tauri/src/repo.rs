@@ -119,6 +119,143 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Duplica un proyecto completo (capítulos, escenas, biblia y relaciones).
+/// Los snapshots y los embeddings no se copian: se reconstruyen si hace falta.
+pub fn duplicate_project(conn: &mut Connection, project_id: &str) -> Result<Project> {
+    let source = get_project(conn, project_id)?
+        .ok_or_else(|| AppError::NotFound(format!("proyecto {project_id}")))?;
+
+    let tx = conn.transaction()?;
+    let new_project = Project::new(format!("{} (copia)", source.title));
+    tx.execute(
+        "INSERT INTO project (id, title, author, description, word_goal, cover_path,
+         level1_name, level2_name, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            new_project.id,
+            new_project.title,
+            source.author,
+            source.description,
+            source.word_goal,
+            source.cover_path,
+            source.level1_name,
+            source.level2_name,
+            new_project.created_at,
+            new_project.updated_at
+        ],
+    )?;
+
+    for chapter in list_chapters(&tx, project_id)? {
+        let new_chapter = Chapter::new(&new_project.id, &chapter.title, chapter.position);
+        tx.execute(
+            "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                new_chapter.id,
+                new_chapter.project_id,
+                new_chapter.position,
+                chapter.title,
+                chapter.status,
+                chapter.summary,
+                chapter.word_count
+            ],
+        )?;
+        for scene in list_scenes_full(&tx, &chapter.id)? {
+            let new_scene = Scene::new(&new_chapter.id, scene.position, scene.title.clone());
+            tx.execute(
+                "INSERT INTO scene (id, chapter_id, position, title, content_markdown,
+                 summary, word_count, created_at, updated_at, status, pov, location, time_label)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    new_scene.id,
+                    new_chapter.id,
+                    scene.position,
+                    scene.title,
+                    scene.content_markdown,
+                    scene.summary,
+                    scene.word_count,
+                    new_scene.created_at,
+                    new_scene.updated_at,
+                    scene.status,
+                    scene.pov,
+                    scene.location,
+                    scene.time_label
+                ],
+            )?;
+        }
+    }
+
+    let mut character_ids: HashMap<String, String> = HashMap::new();
+    for c in list_characters(&tx, project_id)? {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        character_ids.insert(c.id.clone(), new_id.clone());
+        tx.execute(
+            "INSERT INTO character (id, project_id, name, aliases_json, role, description,
+             biography, traits_json, goals_json, arc, color, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                new_id,
+                new_project.id,
+                c.name,
+                json(c.aliases),
+                c.role,
+                c.description,
+                c.biography,
+                json(c.traits),
+                json(c.goals),
+                c.arc,
+                c.color,
+                c.created_at,
+                c.updated_at
+            ],
+        )?;
+    }
+
+    for r in list_relationships(&tx, project_id)? {
+        if let (Some(a), Some(b)) = (
+            character_ids.get(&r.character_a_id),
+            character_ids.get(&r.character_b_id),
+        ) {
+            tx.execute(
+                "INSERT INTO relationship (id, project_id, character_a_id, character_b_id,
+                 kind, intensity, description) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    new_project.id,
+                    a,
+                    b,
+                    r.kind,
+                    r.intensity,
+                    r.description
+                ],
+            )?;
+        }
+    }
+
+    for e in list_entities(&tx, project_id)? {
+        tx.execute(
+            "INSERT INTO entity (id, project_id, name, entity_type, aliases_json,
+             description, mention_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                new_project.id,
+                e.name,
+                e.entity_type,
+                json(e.aliases),
+                e.description,
+                e.mention_count,
+                e.created_at,
+                e.updated_at
+            ],
+        )?;
+    }
+
+    tx.commit()?;
+    get_project(conn, &new_project.id)?
+        .ok_or_else(|| AppError::Internal("no se pudo duplicar el proyecto".into()))
+}
+
 pub fn update_project_goal(conn: &Connection, id: &str, goal: i64) -> Result<Project> {
     if goal <= 0 {
         return Err(AppError::Validation(
@@ -733,6 +870,50 @@ pub fn update_character_profile(
     Ok(())
 }
 
+/// Edición manual completa de una ficha de personaje.
+pub fn update_character(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    aliases: &[String],
+    role: Option<&str>,
+    description: Option<&str>,
+    biography: Option<&str>,
+    traits: &[String],
+    goals: &[String],
+    arc: Option<&str>,
+    color: Option<&str>,
+) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Validation(
+            "el nombre del personaje no puede estar vacío".into(),
+        ));
+    }
+    let affected = conn.execute(
+        "UPDATE character SET name = ?1, aliases_json = ?2, role = ?3, description = ?4,
+         biography = ?5, traits_json = ?6, goals_json = ?7, arc = ?8, color = ?9,
+         updated_at = ?10 WHERE id = ?11",
+        params![
+            name,
+            json(aliases.to_vec()),
+            role,
+            description,
+            biography,
+            json(traits.to_vec()),
+            json(goals.to_vec()),
+            arc,
+            color,
+            Utc::now().to_rfc3339(),
+            id
+        ],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("personaje {id}")));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Relaciones
 // ---------------------------------------------------------------------------
@@ -920,6 +1101,39 @@ pub fn merge_entities(
         }
     }
     tx.commit()?;
+    Ok(())
+}
+
+/// Edición manual de una entidad (lugar, facción…).
+pub fn update_entity(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    entity_type: &str,
+    aliases: &[String],
+    description: Option<&str>,
+) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Validation(
+            "el nombre de la entidad no puede estar vacío".into(),
+        ));
+    }
+    let affected = conn.execute(
+        "UPDATE entity SET name = ?1, entity_type = ?2, aliases_json = ?3,
+         description = ?4, updated_at = ?5 WHERE id = ?6",
+        params![
+            name,
+            entity_type,
+            json(aliases.to_vec()),
+            description,
+            Utc::now().to_rfc3339(),
+            id
+        ],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("entidad {id}")));
+    }
     Ok(())
 }
 
@@ -1471,5 +1685,39 @@ mod tests {
         );
         assert_eq!(chars[0].role.as_deref(), Some("protagonista"));
         assert!(chars[0].aliases.contains(&"la capitana".to_string()));
+    }
+
+    #[test]
+    fn duplicate_project_copies_structure_and_bible() {
+        let mut conn = crate::db::test_connection();
+        let project = create_project(&conn, "Original", None, 5000, None, None).unwrap();
+        let chapter = Chapter::new(&project.id, "Cap 1", 1);
+        conn.execute(
+            "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
+             VALUES (?1, ?2, ?3, ?4, 'draft', NULL, 1)",
+            params![chapter.id, chapter.project_id, chapter.position, chapter.title],
+        )
+        .unwrap();
+        let scene = Scene::new(&chapter.id, 1, None);
+        conn.execute(
+            "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary, word_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, 'hola', NULL, 1, ?4, ?4)",
+            params![scene.id, scene.chapter_id, scene.position, scene.created_at],
+        )
+        .unwrap();
+        let character = Character::new(&project.id, "Elena");
+        merge_characters(&mut conn, &project.id, &[character]).unwrap();
+
+        let copy = duplicate_project(&mut conn, &project.id).unwrap();
+        assert_ne!(copy.id, project.id);
+        assert_eq!(copy.title, "Original (copia)");
+        let chapters = list_chapters(&conn, &copy.id).unwrap();
+        assert_eq!(chapters.len(), 1);
+        let scenes = list_scenes_full(&conn, &chapters[0].id).unwrap();
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].content_markdown, "hola");
+        let chars = list_characters(&conn, &copy.id).unwrap();
+        assert_eq!(chars.len(), 1);
+        assert_eq!(chars[0].name, "Elena");
     }
 }

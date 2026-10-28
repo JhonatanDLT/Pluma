@@ -1092,11 +1092,7 @@ pub fn replace_entities(
 /// Fusiona entidades (lugares, facciones…) por nombre y tipo normalizados.
 /// Conserva el `id` y la descripción editada manualmente, y no elimina las
 /// entidades que no aparezcan en el nuevo análisis.
-pub fn merge_entities(
-    conn: &mut Connection,
-    project_id: &str,
-    incoming: &[Entity],
-) -> Result<()> {
+pub fn merge_entities(conn: &mut Connection, project_id: &str, incoming: &[Entity]) -> Result<()> {
     let existing = list_entities(conn, project_id)?;
     let tx = conn.transaction()?;
     for new in incoming {
@@ -1742,7 +1738,12 @@ mod tests {
         conn.execute(
             "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
              VALUES (?1, ?2, ?3, ?4, 'draft', NULL, 1)",
-            params![chapter.id, chapter.project_id, chapter.position, chapter.title],
+            params![
+                chapter.id,
+                chapter.project_id,
+                chapter.position,
+                chapter.title
+            ],
         )
         .unwrap();
         let scene = Scene::new(&chapter.id, 1, None);
@@ -1772,8 +1773,7 @@ mod tests {
     #[ignore = "benchmark manual de 500k palabras"]
     fn benchmark_large_project_500k_words() {
         let mut conn = crate::db::test_connection();
-        let project =
-            create_project(&conn, "Benchmark 500k", None, 500_000, None, None).unwrap();
+        let project = create_project(&conn, "Benchmark 500k", None, 500_000, None, None).unwrap();
         let chapter = Chapter::new(&project.id, "Cap 1", 1);
         conn.execute(
             "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)

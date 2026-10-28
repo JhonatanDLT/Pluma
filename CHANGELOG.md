@@ -20,6 +20,10 @@ semántico.
 - **Exportación atómica:** se escribe a un temporal y se renombra, para no dejar
   archivos truncados si falla a mitad.
 - **Comprobación de integridad** de SQLite (`quick_check`) al arrancar.
+- **Instancia única:** abrir Pluma de nuevo enfoca la ventana existente y
+  reenvía el archivo que se haya abierto por asociación.
+- El reemplazo ortográfico afecta solo a la ocurrencia seleccionada.
+- `cargo fmt --check` en CI.
 
 ### Corregido
 

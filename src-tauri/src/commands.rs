@@ -50,8 +50,8 @@ fn validate_import_path(path: &std::path::Path) -> Result<()> {
         .unwrap_or("")
         .to_lowercase();
     const ALLOWED: &[&str] = &[
-        "md", "markdown", "txt", "pdf", "docx", "epub", "png", "jpg", "jpeg", "webp", "gif",
-        "bmp", "tif", "tiff",
+        "md", "markdown", "txt", "pdf", "docx", "epub", "png", "jpg", "jpeg", "webp", "gif", "bmp",
+        "tif", "tiff",
     ];
     if !ALLOWED.contains(&ext.as_str()) {
         return Err(AppError::Validation(format!(
@@ -109,7 +109,11 @@ fn validate_export_path(path: &std::path::Path, format: &str) -> Result<()> {
         "docx" => &["docx"],
         "pdf" => &["pdf"],
         "epub" => &["epub"],
-        _ => return Err(AppError::Validation(format!("formato desconocido: {format}"))),
+        _ => {
+            return Err(AppError::Validation(format!(
+                "formato desconocido: {format}"
+            )));
+        }
     };
     if !allowed.contains(&ext.as_str()) {
         return Err(AppError::Validation(format!(

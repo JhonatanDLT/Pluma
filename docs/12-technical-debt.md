@@ -134,13 +134,19 @@ criterio de aceptación.
 - Restauración de backups (TD-27). Pendiente.
 - Rutas relativas de assets (TD-29). Pendiente.
 
-### Sprint 6 — Accesibilidad y confianza
+### Sprint 6 — Accesibilidad y confianza (en curso)
 
-- Modal compartido con focus trap (TD-37).
-- Reemplazo ortográfico de una ocurrencia (TD-42) e ignorar/añadir (TD-43).
-- Corrección IA sin remontar el editor (TD-41).
-- Logging estructurado y single-instance (TD-04, TD-05).
-- `fmt`/`clippy`/audit en CI (TD-45, TD-46).
+> Estado: single-instance (TD-05), reemplazo de una sola ocurrencia (TD-42) y
+> `cargo fmt --check` en CI (parte de TD-45) completados.
+
+- Reemplazo ortográfico de una ocurrencia (TD-42). ✅
+- Single-instance (TD-05). ✅
+- `cargo fmt --check` en CI (TD-45). ✅ (clippy pendiente)
+- Modal compartido con focus trap (TD-37). Pendiente.
+- Ignorar/añadir al diccionario (TD-43). Pendiente.
+- Corrección IA sin remontar el editor (TD-41). Pendiente.
+- Logging estructurado (TD-04). Pendiente.
+- `clippy -D warnings` y audit (TD-45, TD-46). Pendiente.
 
 ### Sprint 7 — IA y distribución
 

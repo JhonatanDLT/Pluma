@@ -59,8 +59,7 @@ const SUPPORTED_LANGUAGES: &[(&str, &str)] = &[
 /// Se fija a un commit concreto de `wooorm/dictionaries` en lugar de `main`:
 /// así una actualización del repositorio no cambia silenciosamente el contenido
 /// que descargan los usuarios. Actualizar este SHA es una decisión explícita.
-const DICT_BASE_URL: &str =
-    "https://raw.githubusercontent.com/wooorm/dictionaries/8cfea406b505e4d7df52d5a19bce525df98c54ab/dictionaries";
+const DICT_BASE_URL: &str = "https://raw.githubusercontent.com/wooorm/dictionaries/8cfea406b505e4d7df52d5a19bce525df98c54ab/dictionaries";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SpellIssue {

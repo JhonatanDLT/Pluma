@@ -1248,8 +1248,10 @@
 
   function replaceWord(word: string, suggestion: string) {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Reemplaza solo la primera ocurrencia: el panel de ortografía muestra una
+    // incidencia concreta y no debe cambiar el resto de la escena.
     sceneContent = sceneContent.replace(
-      new RegExp(`\\b${escaped}\\b`, "gi"),
+      new RegExp(`\\b${escaped}\\b`, "i"),
       suggestion,
     );
     editorRevision++;

@@ -46,7 +46,8 @@ impl Db {
 
         // Comprobación rápida de integridad: avisa sin impedir el arranque para
         // que el usuario aún pueda exportar o restaurar una copia.
-        if let Ok(status) = conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0)) {
+        if let Ok(status) = conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+        {
             if status != "ok" {
                 eprintln!("[pluma] advertencia: quick_check de SQLite: {status}");
             }

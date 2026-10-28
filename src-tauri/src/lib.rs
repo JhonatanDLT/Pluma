@@ -42,6 +42,26 @@ fn resolve_data_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Debe ser el primer plugin: si ya hay una instancia, enfoca su ventana
+        // y reenvía los archivos abiertos por asociación.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+            if let Some(state) = app.try_state::<OpenedFiles>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    for arg in argv.into_iter().skip(1) {
+                        let path = std::path::Path::new(&arg);
+                        if path.is_file() {
+                            let path = path.to_string_lossy().into_owned();
+                            guard.push(path.clone());
+                            let _ = app.emit("open-file", vec![path]);
+                        }
+                    }
+                }
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())

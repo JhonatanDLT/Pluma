@@ -62,10 +62,7 @@ pub fn export(
         .and_then(|s| s.to_str())
         .unwrap_or("export");
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
-    let tmp = parent.join(format!(
-        ".{stem}.{}.tmp.{ext}",
-        uuid::Uuid::new_v4()
-    ));
+    let tmp = parent.join(format!(".{stem}.{}.tmp.{ext}", uuid::Uuid::new_v4()));
 
     let result = match format {
         ExportFormat::Markdown => write_text(&tmp, &build_markdown(meta, content)),
@@ -77,9 +74,8 @@ pub fn export(
     };
 
     if result.is_ok() {
-        std::fs::rename(&tmp, path).map_err(|e| {
-            AppError::Internal(format!("no se pudo finalizar la exportación: {e}"))
-        })?;
+        std::fs::rename(&tmp, path)
+            .map_err(|e| AppError::Internal(format!("no se pudo finalizar la exportación: {e}")))?;
     } else {
         let _ = std::fs::remove_file(&tmp);
     }

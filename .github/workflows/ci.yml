@@ -64,7 +64,22 @@ jobs:
       - name: Rust lints
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+      - name: Rust tests (Ubuntu, anota el fallo)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set +e
+          cargo test --manifest-path src-tauri/Cargo.toml --lib 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            grep -E "FAILED|panicked|test result" test.log | tail -20 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit $status
+          fi
+
       - name: Rust tests
+        if: matrix.os != 'ubuntu-latest'
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Rust check (all targets)

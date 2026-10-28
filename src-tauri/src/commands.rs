@@ -767,18 +767,25 @@ pub async fn analyze_project(
         if settings.embeddings
             && let Some(e) = embedder_guard.as_mut()
         {
-            let guard = lock(&db)?;
-            let content = repo::get_project_content(&guard, &project_id)?;
-            let scenes: Vec<(String, String)> = content
-                .iter()
-                .flat_map(|(_, scenes)| {
-                    scenes
-                        .iter()
-                        .map(|s| (s.id.clone(), s.content_markdown.clone()))
-                })
-                .filter(|(_, c)| !c.trim().is_empty())
-                .collect();
-            let _ = rag::index_project(&guard, &project_id, &scenes, e);
+            // Lee las escenas con el lock y suéltalo antes de embeber: el modelo
+            // es la parte lenta y no debe bloquear el autoguardado.
+            let scenes = {
+                let guard = lock(&db)?;
+                let content = repo::get_project_content(&guard, &project_id)?;
+                content
+                    .iter()
+                    .flat_map(|(_, scenes)| {
+                        scenes
+                            .iter()
+                            .map(|s| (s.id.clone(), s.content_markdown.clone()))
+                    })
+                    .filter(|(_, c)| !c.trim().is_empty())
+                    .collect::<Vec<_>>()
+            };
+            if let Ok(embeddings) = rag::embed_scenes(&scenes, e) {
+                let guard = lock(&db)?;
+                let _ = repo::replace_embeddings(&guard, &project_id, &embeddings);
+            }
         }
 
         analysis
@@ -1055,20 +1062,27 @@ pub fn index_project(
         *embedder_guard = crate::engines::create_embedder(&settings, &embedder_cache_dir(&app)?);
     }
 
-    let conn = lock(&db)?;
-    let content = repo::get_project_content(&conn, &project_id)?;
-    let scenes: Vec<(String, String)> = content
-        .iter()
-        .flat_map(|(_, scenes)| {
-            scenes
-                .iter()
-                .map(|s| (s.id.clone(), s.content_markdown.clone()))
-        })
-        .filter(|(_, c)| !c.trim().is_empty())
-        .collect();
+    // Lee las escenas con el lock y suéltalo antes de embeber.
+    let scenes = {
+        let conn = lock(&db)?;
+        let content = repo::get_project_content(&conn, &project_id)?;
+        content
+            .iter()
+            .flat_map(|(_, scenes)| {
+                scenes
+                    .iter()
+                    .map(|s| (s.id.clone(), s.content_markdown.clone()))
+            })
+            .filter(|(_, c)| !c.trim().is_empty())
+            .collect::<Vec<_>>()
+    };
 
     let result = match embedder_guard.as_mut() {
-        Some(embedder) => rag::index_project(&conn, &project_id, &scenes, embedder),
+        Some(embedder) => rag::embed_scenes(&scenes, embedder).and_then(|embeddings| {
+            let conn = lock(&db)?;
+            repo::replace_embeddings(&conn, &project_id, &embeddings)?;
+            Ok(embeddings.len())
+        }),
         None => Err(AppError::Internal(
             "no se pudo cargar el modelo de embeddings".into(),
         )),
@@ -1278,8 +1292,9 @@ pub fn ia_install(app: tauri::AppHandle, engine: String) -> Result<()> {
         }
         "gliner" => {
             require_runtime(&data_dir)?;
-            // Cargar el motor descarga el checkpoint ONNX la primera vez (~1 GB).
-            crate::engines::Gliner2Engine::try_new(&gliner_cache_dir(&app)?)?;
+            // Descarga sin crear las sesiones ONNX: evita un pico de ~1 GB de RAM
+            // solo por instalar el modelo.
+            crate::engines::download_gliner(&gliner_cache_dir(&app)?)?;
             Ok(())
         }
         other => Err(AppError::Validation(format!(

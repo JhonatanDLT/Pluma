@@ -1630,6 +1630,24 @@ pub fn save_embedding(
     Ok(())
 }
 
+/// Reemplaza el índice de embeddings de un proyecto en una sola transacción.
+pub fn replace_embeddings(
+    conn: &Connection,
+    project_id: &str,
+    embeddings: &[(String, Vec<f32>)],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM scene_embeddings WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    for (scene_id, embedding) in embeddings {
+        save_embedding(&tx, project_id, scene_id, embedding)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Devuelve todos los embeddings de un proyecto: `(scene_id, vector)`.
 pub fn list_embeddings(conn: &Connection, project_id: &str) -> Result<Vec<(String, Vec<f32>)>> {
     let mut stmt =
@@ -1646,15 +1664,6 @@ pub fn list_embeddings(conn: &Connection, project_id: &str) -> Result<Vec<(Strin
         out.push((scene_id, embedding));
     }
     Ok(out)
-}
-
-/// Elimina el índice de un proyecto.
-pub fn clear_embeddings(conn: &Connection, project_id: &str) -> Result<()> {
-    conn.execute(
-        "DELETE FROM scene_embeddings WHERE project_id = ?1",
-        params![project_id],
-    )?;
-    Ok(())
 }
 
 /// `true` si el proyecto tiene al menos un embedding indexado.

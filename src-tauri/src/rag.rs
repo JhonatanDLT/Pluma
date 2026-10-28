@@ -9,24 +9,20 @@ use crate::error::Result;
 /// Número de escenas de contexto que se inyectan en el chat.
 pub const TOP_K: usize = 3;
 
-/// Reindexa las escenas de un proyecto: embebe cada una y guarda el vector.
-/// Devuelve el número de escenas indexadas.
-pub fn index_project<E: Embedder>(
-    conn: &Connection,
-    project_id: &str,
+/// Embebe las escenas **sin tocar la base de datos**. El llamador puede soltar
+/// el lock de SQLite mientras se ejecuta el modelo (la parte lenta) y persistir
+/// el resultado después con `repo::replace_embeddings`.
+pub fn embed_scenes<E: Embedder>(
     scenes: &[(String, String)],
     embedder: &mut E,
-) -> Result<usize> {
-    crate::repo::clear_embeddings(conn, project_id)?;
-
+) -> Result<Vec<(String, Vec<f32>)>> {
     let texts: Vec<String> = scenes.iter().map(|(_, c)| c.clone()).collect();
     let embeddings = embedder.embed(&texts)?;
-
-    for ((scene_id, _), embedding) in scenes.iter().zip(embeddings.iter()) {
-        crate::repo::save_embedding(conn, project_id, scene_id, embedding)?;
-    }
-
-    Ok(scenes.len())
+    Ok(scenes
+        .iter()
+        .map(|(scene_id, _)| scene_id.clone())
+        .zip(embeddings)
+        .collect())
 }
 
 /// Recupera los textos de las top-k escenas más similares a `query`.
@@ -111,7 +107,8 @@ mod tests {
             ("b".to_string(), "beta".to_string()),
         ];
         let mut embedder = FakeEmbedder;
-        index_project(&conn, "p1", &scenes, &mut embedder).unwrap();
+        let embeddings = embed_scenes(&scenes, &mut embedder).unwrap();
+        crate::repo::replace_embeddings(&conn, "p1", &embeddings).unwrap();
 
         let listed = crate::repo::list_embeddings(&conn, "p1").unwrap();
         assert_eq!(listed.len(), 2);

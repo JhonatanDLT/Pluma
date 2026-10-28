@@ -4,6 +4,7 @@
   import VersionsPanel from "$lib/components/VersionsPanel.svelte";
   import AiSettings from "$lib/components/AiSettings.svelte";
   import AppearanceSettings from "$lib/components/AppearanceSettings.svelte";
+  import UpdateSettings from "$lib/components/UpdateSettings.svelte";
   import type {
     BackupInfo,
     Chapter,
@@ -207,6 +208,8 @@
           <h4>Apariencia</h4>
           <AppearanceSettings />
         </section>
+
+        <UpdateSettings />
       </div>
     {/if}
   </div>

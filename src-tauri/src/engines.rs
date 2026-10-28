@@ -87,6 +87,60 @@ pub fn create_embedder(settings: &IaSettings, cache_dir: &Path) -> Option<FastEm
     FastEmbedder::try_new(cache_dir).ok()
 }
 
+/// Revisión de Hugging Face fijada para GLiNER2 (ver `scripts/fetch-models.sh`).
+pub const GLINER_REVISION: &str = "4241d7c66b648e618c89c150bf4cf418d2f83159";
+/// Revisión de Hugging Face fijada para los embeddings.
+pub const EMBEDDINGS_REVISION: &str = "614241f622f53c4eeff9890bdc4f31cfecc418b3";
+
+fn hf_cache_root() -> Option<std::path::PathBuf> {
+    if let Ok(home) = std::env::var("HF_HOME") {
+        return Some(std::path::PathBuf::from(home).join("hub"));
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|h| std::path::PathBuf::from(h).join(".cache/huggingface/hub"))
+}
+
+fn has_revision(cache_dir: &Path, repo_id: &str, revision: &str) -> bool {
+    let repo_dir = format!("models--{}", repo_id.replace('/', "--"));
+    let candidates = [
+        hf_cache_root().map(|root| root.join(&repo_dir).join("snapshots").join(revision)),
+        Some(cache_dir.join(&repo_dir).join("snapshots").join(revision)),
+        Some(cache_dir.join(revision)),
+    ];
+    candidates.into_iter().flatten().any(|path| path.exists())
+}
+
+/// Comprueba (sin bloquear) que los modelos descargados correspondan a las
+/// revisiones fijadas. `gliner2-rs` y `fastembed` no permiten fijar la revisión
+/// en su API, así que esto es una auditoría best-effort: si hay drift, se avisa
+/// en el log para que el usuario ejecute `scripts/fetch-models.sh`.
+pub fn verify_model_revisions(data_dir: &Path) {
+    let embeddings = data_dir.join("models").join("embeddings");
+    let gliner = data_dir.join("models").join("gliner");
+
+    if is_gliner_cached(&gliner)
+        && !has_revision(&gliner, "jugaadsrl/gliner2-multi-v1-onnx", GLINER_REVISION)
+    {
+        log::warn!(
+            "GLiNER2 no está en la revisión fijada ({}); ejecuta scripts/fetch-models.sh",
+            GLINER_REVISION
+        );
+    }
+    if is_embeddings_cached(&embeddings)
+        && !has_revision(
+            &embeddings,
+            "intfloat/multilingual-e5-small",
+            EMBEDDINGS_REVISION,
+        )
+    {
+        log::warn!(
+            "embeddings no están en la revisión fijada ({}); ejecuta scripts/fetch-models.sh",
+            EMBEDDINGS_REVISION
+        );
+    }
+}
+
 /// Nombre del archivo marcador que indica que el modelo GLiNER2 ya se descargó.
 ///
 /// `gliner2-rs` delega la descarga en `hf-hub`, que guarda los pesos en el caché
@@ -155,6 +209,24 @@ impl NerEngine for Gliner2Engine {
             .collect();
         Ok(mentions)
     }
+}
+
+/// Descarga el checkpoint de GLiNER2 **sin cargarlo en memoria**.
+///
+/// `SpanEngine::new` descarga y crea las sesiones ONNX (~1 GB de RAM). Para el
+/// botón «Instalar» solo hace falta descargar; `hub::download` deja los pesos en
+/// la caché de HuggingFace y el motor se cargará la primera vez que se analice.
+pub fn download_gliner(cache_dir: &Path) -> Result<()> {
+    gliner2_rs::init("pluma");
+    gliner2_rs::hub::download(
+        gliner2_rs::hub::GLINER2_MULTI_V1,
+        gliner2_rs::Precision::Fp32,
+    )
+    .map_err(|e| AppError::Internal(format!("no se pudo descargar GLiNER2: {e}")))?;
+
+    std::fs::create_dir_all(cache_dir)?;
+    std::fs::write(cache_dir.join(GLINER_MARKER), b"ok")?;
+    Ok(())
 }
 
 /// Indica si el modelo GLiNER2 ya se descargó (según el marcador local).

@@ -87,6 +87,7 @@ pub fn run() {
             crate::runtime::prepare(&dir, resource_dir.as_deref());
             let db = db::Db::open(&dir.join("pluma.db"))?;
             log::info!("Pluma iniciada; datos en {}", dir.display());
+            crate::engines::verify_model_revisions(&dir);
             // Copia automática diaria antes de que el usuario empiece a escribir.
             if let Ok(conn) = db.conn.lock() {
                 let _ = crate::commands::maybe_auto_backup(&conn, &dir);

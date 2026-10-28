@@ -38,6 +38,16 @@ semántico.
 - `cargo clippy -D warnings` en CI y limpieza de los avisos existentes.
 - Workflow semanal de auditoría de dependencias (`pnpm audit` bloqueante,
   `cargo audit` informativo).
+- **RAG sin lock de BD:** el embedding se ejecuta con el lock de SQLite liberado
+  y se persiste en una transacción aparte.
+- **Instalación de GLiNER2 sin cargar 1 GB:** el botón «Instalar» descarga el
+  checkpoint con `hub::download` sin crear las sesiones ONNX.
+- **Verificación de revisión de modelos:** aviso en el log si GLiNER2 o los
+  embeddings no coinciden con las revisiones fijadas.
+- **UI de actualizaciones:** comprobar, descargar e instalar desde Ajustes
+  (requiere configurar el endpoint real).
+- **Verificación de artefactos de release:** instaladores, firma `.sig`,
+  Gatekeeper y notarización en macOS.
 
 ### Corregido
 

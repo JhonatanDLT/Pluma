@@ -151,13 +151,21 @@ criterio de aceptación.
 - Audit de dependencias (TD-46). ✅ (`pnpm audit` bloqueante; `cargo audit`
   informativo en el workflow semanal).
 
-### Sprint 7 — IA y distribución
+### Sprint 7 — IA y distribución (en curso)
 
-- Descarga de modelos con progreso/cancelación (TD-13) y sin cargar 1 GB (TD-12).
-- RAG sin lock (TD-10).
-- Vendorizado/hashes de modelos (TD-16, TD-17).
-- Updater real y firma Windows (TD-21, TD-22).
-- Verificación de artefactos (TD-48).
+> Estado: RAG sin lock (TD-10), descarga de GLiNER sin cargar 1 GB (TD-12),
+> verificación de revisión de modelos (TD-16/17, best-effort), UI del updater
+> (TD-21) y verificación de artefactos (TD-48) completados.
+
+- RAG sin lock (TD-10). ✅
+- Descarga de GLiNER sin cargar 1 GB (TD-12). ✅
+- Verificación de revisión de modelos (TD-16, TD-17). 🚧 (aviso; falta
+  vendorizado/checksums estrictos)
+- UI de actualizaciones (TD-21). ✅ (endpoint real pendiente)
+- Verificación de artefactos de release (TD-48). ✅
+- Descarga de modelos con progreso/cancelación (TD-13). Pendiente.
+- Firma Windows (TD-22). Pendiente de certificado.
+- Vendorizado/checksums estrictos (TD-16, TD-17). Pendiente.
 
 ---
 

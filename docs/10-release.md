@@ -42,6 +42,10 @@ El workflow `.github/workflows/release.yml` ejecuta el script automáticamente
 antes de `tauri-action`. En macOS Intel (x86_64) el script avisa y continúa sin
 IA local, porque ONNX Runtime 1.28 no publica build para esa arquitectura.
 
+Después del build, el workflow ejecuta `scripts/verify-release.sh`, que comprueba
+que existan los instaladores y la firma `.sig` del updater, y en macOS valida
+Gatekeeper (`spctl`) y la notarización (`stapler`).
+
 ## 3. Firma y notarización
 
 ### macOS

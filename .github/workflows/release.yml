@@ -89,3 +89,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Verify release artifacts
+        shell: bash
+        run: ./scripts/verify-release.sh

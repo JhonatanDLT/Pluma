@@ -29,6 +29,10 @@ pub struct IaSettings {
     pub cloud_api_key: Option<String>,
     /// Modelo en la nube.
     pub cloud_model: Option<String>,
+    /// Consentimiento explícito para enviar fragmentos del manuscrito a la nube.
+    /// Desactivado por defecto: la IA en la nube **no** se usa aunque haya una
+    /// API key guardada hasta que el usuario lo active.
+    pub cloud_ai_enabled: bool,
     /// Perfil de alto rendimiento: mantener los modelos cargados en memoria entre
     /// análisis. `false` (por defecto) = cargar y liberar en cada uso (mínimo consumo).
     pub keep_loaded: bool,
@@ -47,6 +51,7 @@ impl Default for IaSettings {
             cloud_provider: None,
             cloud_api_key: None,
             cloud_model: None,
+            cloud_ai_enabled: false,
             keep_loaded: false,
             profile: None,
         }

@@ -9,7 +9,29 @@
 
 ## Estado actual
 
-**Todas las fases implementadas y compilando** (backend Rust + frontend Svelte).
+**Versión 1.0.0 — release candidate.** Backend Rust + frontend Svelte compilando,
+con CI multiplataforma y checklist de firma/notarización.
+
+### 🆕 Novedades 1.0 (estabilidad y confianza)
+
+- **Análisis no destructivo:** fusiona personajes, relaciones y entidades por
+  nombre/alias normalizado, conserva IDs y fichas editadas y ya no borra la
+  biblia al analizar un capítulo.
+- **Guardado íntegro:** `Ctrl/Cmd+S`, flush al cerrar la ventana, reintento de
+  autoguardado y diario de recuperación para cierres inesperados.
+- **Copias de seguridad:** `VACUUM INTO` manual + copia automática diaria con
+  retención de 14 días.
+- **Biblia editable:** formularios para corregir fichas de personaje y entidades.
+- **Duplicar proyecto** y **proyecto de ejemplo** para onboarding.
+- **Seguridad:** CSP estricta, Markdown sanitizado con DOMPurify, validación de
+  rutas/tamaños en import/export y protocolo `asset` para imágenes.
+- **Privacidad:** la IA en la nube requiere consentimiento explícito; por defecto
+  todo se queda en el equipo.
+- **Accesibilidad:** contraste WCAG, foco visible, `color-scheme` y
+  `--on-accent`.
+- **TTS:** elimina Markdown, lista voces del sistema y detiene solo su proceso.
+- **CI/release:** workflows de verificación y build firmado; ver
+  [`docs/10-release.md`](docs/10-release.md).
 
 ### ✅ Implementado
 
@@ -58,6 +80,9 @@
 - TTS neuronal (Piper) — ver `docs/04`.
 - Búsqueda server-side FTS5 (hoy client-side) — ver deuda técnica en `docs/08`.
 - Modo foco y atajos de teclado configurables.
+- Empaquetar ONNX Runtime dentro del `.app` para evitar el conflicto con el
+  hardened runtime de macOS (ver `docs/10-release.md`).
+- Actualizador firmado con despliegue escalonado.
 
 ---
 
@@ -174,6 +199,8 @@ cargo check     # Rust (desde src-tauri/)
 | [`docs/06-roadmap.md`](docs/06-roadmap.md) | Fases e hitos |
 | [`docs/07-investigacion-ia.md`](docs/07-investigacion-ia.md) | Investigación de modelos y algoritmos de IA local |
 | [`docs/08-plan-maestro.md`](docs/08-plan-maestro.md) | Visión de producto, principios y roadmap completo |
+| [`docs/09-roadmap-v1.md`](docs/09-roadmap-v1.md) | Roadmap priorizado de V1.0 |
+| [`docs/10-release.md`](docs/10-release.md) | Firma, notarización, updater y checklist de release |
 | [`docs/09-roadmap-v1.md`](docs/09-roadmap-v1.md) | **Roadmap priorizado para V1.0**: must-haves, can-waits, secuencia IA/core y plan de 3 sprints |
 
 ---

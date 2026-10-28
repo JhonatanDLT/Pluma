@@ -112,6 +112,7 @@ export interface IaSettings {
   relationship_model: string | null;
   cloud_provider: string | null;
   cloud_model: string | null;
+  cloud_ai_enabled: boolean;
   keep_loaded: boolean;
   profile: string | null;
 }

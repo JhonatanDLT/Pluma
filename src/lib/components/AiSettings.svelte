@@ -16,6 +16,7 @@
     onupdatecloudprovider,
     onupdatecloudapikey,
     onupdatecloudmodel,
+    onupdatecloudenabled,
     onindexproject,
   }: {
     iaStatus: IaStatus | null;
@@ -32,6 +33,7 @@
     onupdatecloudprovider: (provider: string | null) => void;
     onupdatecloudapikey: (key: string | null) => void;
     onupdatecloudmodel: (model: string | null) => void;
+    onupdatecloudenabled: (enabled: boolean) => void;
     onindexproject: () => void;
   } = $props();
 
@@ -147,6 +149,14 @@
       </label>
 
       {#if iaStatus.settings.cloud_provider}
+        <label class="toggle">
+          <input
+            type="checkbox"
+            checked={iaStatus.settings.cloud_ai_enabled}
+            onchange={(e) => onupdatecloudenabled(e.currentTarget.checked)}
+          />
+          <span>Acepto enviar fragmentos del manuscrito a la nube</span>
+        </label>
         <label class="field">
           <span>API key</span>
           <input
@@ -172,7 +182,8 @@
         </label>
         <p class="ia-note">
           La clave se guarda cifrada en el llavero del sistema operativo (no en
-          texto plano). Al configurarla, la nube queda activa por defecto.
+          texto plano). La nube solo se usa si marcas la casilla de
+          consentimiento; si no, todo el análisis se queda en tu equipo.
         </p>
       {/if}
     </div>

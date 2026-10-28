@@ -1054,6 +1054,17 @@
     }
   }
 
+  async function updateCloudEnabled(enabled: boolean) {
+    if (!iaStatus) return;
+    try {
+      const settings = { ...iaStatus.settings, cloud_ai_enabled: enabled };
+      const saved = await api.iaSetSettings(settings);
+      iaStatus = { ...iaStatus, settings: saved };
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Texto a voz
   // -------------------------------------------------------------------------
@@ -1531,6 +1542,7 @@
             onupdatecloudprovider={updateCloudProvider}
             onupdatecloudapikey={updateCloudApiKey}
             onupdatecloudmodel={updateCloudModel}
+            onupdatecloudenabled={updateCloudEnabled}
             onindexproject={indexProject}
           />
         </aside>

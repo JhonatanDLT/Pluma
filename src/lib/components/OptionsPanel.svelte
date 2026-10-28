@@ -44,6 +44,7 @@
     onupdatecloudprovider,
     onupdatecloudapikey,
     onupdatecloudmodel,
+    onupdatecloudenabled,
     onindexproject,
   }: {
     chapter: Chapter | null;
@@ -81,6 +82,7 @@
     onupdatecloudprovider: (provider: string | null) => void;
     onupdatecloudapikey: (key: string | null) => void;
     onupdatecloudmodel: (model: string | null) => void;
+    onupdatecloudenabled: (enabled: boolean) => void;
     onindexproject: () => void;
   } = $props();
 
@@ -177,6 +179,7 @@
             {onupdatecloudprovider}
             {onupdatecloudapikey}
             {onupdatecloudmodel}
+            {onupdatecloudenabled}
             {onindexproject}
           />
         </section>

@@ -1720,4 +1720,57 @@ mod tests {
         assert_eq!(chars.len(), 1);
         assert_eq!(chars[0].name, "Elena");
     }
+
+    #[test]
+    #[ignore = "benchmark manual de 500k palabras"]
+    fn benchmark_large_project_500k_words() {
+        let mut conn = crate::db::test_connection();
+        let project =
+            create_project(&conn, "Benchmark 500k", None, 500_000, None, None).unwrap();
+        let chapter = Chapter::new(&project.id, "Cap 1", 1);
+        conn.execute(
+            "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
+             VALUES (?1, ?2, ?3, ?4, 'draft', NULL, 500000)",
+            params![
+                chapter.id,
+                chapter.project_id,
+                chapter.position,
+                chapter.title
+            ],
+        )
+        .unwrap();
+
+        let scene_text = "palabra ".repeat(1000);
+        let start = std::time::Instant::now();
+        {
+            let tx = conn.transaction().unwrap();
+            for i in 0..500 {
+                let scene = Scene::new(&chapter.id, i + 1, None);
+                tx.execute(
+                    "INSERT INTO scene (id, chapter_id, position, title, content_markdown,
+                     summary, word_count, created_at, updated_at, status)
+                     VALUES (?1, ?2, ?3, NULL, ?4, NULL, 1000, ?5, ?5, 'draft')",
+                    params![
+                        scene.id,
+                        scene.chapter_id,
+                        scene.position,
+                        scene_text,
+                        scene.created_at
+                    ],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let insert = start.elapsed();
+
+        let start = std::time::Instant::now();
+        let scenes = list_scenes_full(&conn, &chapter.id).unwrap();
+        let read = start.elapsed();
+
+        assert_eq!(scenes.len(), 500);
+        assert!(insert.as_secs() < 15, "inserción lenta: {insert:?}");
+        assert!(read.as_secs() < 2, "lectura lenta: {read:?}");
+        println!("500k palabras → inserción {insert:?}, lectura {read:?}");
+    }
 }

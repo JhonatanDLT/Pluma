@@ -645,4 +645,29 @@ mod tests {
         assert!(!names.contains(&"Zhou"), "nombre fragmentado: {names:?}");
         assert!(!names.contains(&"Mingrui"), "nombre fragmentado: {names:?}");
     }
+
+    /// Golden set mínimo para detectar regresiones en el análisis en español.
+    /// No sustituye a una evaluación con GLiNER2, pero cubre personajes
+    /// principales y una relación con múltiples co-ocurrencias.
+    #[test]
+    fn golden_set_spanish_narrative() {
+        let texts = vec![
+            "Al amanecer, Elena llegó a la taberna. El capitán Rivas la esperaba junto al fuego."
+                .to_string(),
+            "—No deberías estar aquí —dijo Rivas—. Tu hermana Elena me pidió que te protegiera."
+                .to_string(),
+            "Rivas miró a Elena. Sabía que el capitán nunca mentía.".to_string(),
+        ];
+        let result = analyze::<crate::engines::FastEmbedder>(&texts, None);
+        let names: Vec<&str> = result.characters.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"Elena"), "faltó Elena: {names:?}");
+        assert!(names.contains(&"Rivas"), "faltó Rivas: {names:?}");
+        assert!(
+            result.relationships.iter().any(|r| {
+                (r.a == "Elena" && r.b == "Rivas") || (r.a == "Rivas" && r.b == "Elena")
+            }),
+            "no se detectó la relación Elena↔Rivas: {:?}",
+            result.relationships
+        );
+    }
 }

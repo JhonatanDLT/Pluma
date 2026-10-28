@@ -88,15 +88,18 @@ pub fn absolutize_project(mut project: Project, data_dir: &Path) -> Project {
 /// Migración idempotente: convierte rutas absolutas antiguas a relativas.
 pub fn normalize_existing(conn: &Connection, data_dir: &Path) -> Result<()> {
     let data_dir_str = data_dir.to_string_lossy().to_string();
+    let data_dir_forward = data_dir_str.replace('\\', "/");
 
     let projects: Vec<(String, String)> = {
         let mut stmt = conn.prepare(
             "SELECT id, cover_path FROM project
-             WHERE cover_path IS NOT NULL AND instr(cover_path, ?1) > 0",
+             WHERE cover_path IS NOT NULL
+               AND (instr(cover_path, ?1) > 0 OR instr(cover_path, ?2) > 0)",
         )?;
-        stmt.query_map(params![data_dir_str], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
+        stmt.query_map(
+            params![data_dir_str.as_str(), data_dir_forward.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for (id, cover) in projects {
@@ -112,11 +115,12 @@ pub fn normalize_existing(conn: &Connection, data_dir: &Path) -> Result<()> {
     let scenes: Vec<(String, String)> = {
         let mut stmt = conn.prepare(
             "SELECT id, content_markdown FROM scene
-             WHERE instr(content_markdown, ?1) > 0",
+             WHERE instr(content_markdown, ?1) > 0 OR instr(content_markdown, ?2) > 0",
         )?;
-        stmt.query_map(params![data_dir_str], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
+        stmt.query_map(
+            params![data_dir_str.as_str(), data_dir_forward.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for (id, content) in scenes {

@@ -46,7 +46,8 @@ jobs:
             libssl-dev \
             libdbus-1-dev \
             libsecret-1-dev \
-            pkg-config
+            pkg-config \
+            fonts-dejavu-core
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile

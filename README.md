@@ -203,8 +203,12 @@ cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 >
 > ```bash
 > sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
->   librsvg2-dev patchelf libssl-dev libdbus-1-dev libsecret-1-dev pkg-config
+>   librsvg2-dev patchelf libssl-dev libdbus-1-dev libsecret-1-dev pkg-config \
+>   fonts-dejavu-core
 > ```
+>
+> `fonts-dejavu-core` es necesario para exportar a PDF (Pluma usa una fuente TTF
+> del sistema).
 
 ### Requisitos opcionales
 

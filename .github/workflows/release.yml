@@ -55,7 +55,8 @@ jobs:
             libssl-dev \
             libdbus-1-dev \
             libsecret-1-dev \
-            pkg-config
+            pkg-config \
+            fonts-dejavu-core
 
       - run: pnpm install --frozen-lockfile
 

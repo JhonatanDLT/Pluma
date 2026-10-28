@@ -64,8 +64,8 @@ jobs:
       - name: Rust lints
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      - name: Rust tests (Ubuntu, anota el fallo)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Rust tests (Ubuntu/Windows, anota el fallo)
+        if: matrix.os != 'macos-latest'
         shell: bash
         run: |
           set +e
@@ -79,7 +79,7 @@ jobs:
           fi
 
       - name: Rust tests
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.os == 'macos-latest'
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Rust check (all targets)

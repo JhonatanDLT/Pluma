@@ -63,11 +63,14 @@ pub fn relativize_markdown(markdown: &str, data_dir: &Path) -> String {
     let mut out = markdown.to_string();
     for prefix in prefixes {
         for folder in ["images", "covers"] {
-            for sep in ["/", "\\"] {
-                let abs = format!("{prefix}{sep}{folder}{sep}");
-                out = out.replace(&format!("]({abs}"), &format!("]({folder}/"));
-                out = out.replace(&format!("src=\"{abs}"), &format!("src=\"{folder}/"));
-                out = out.replace(&format!("src='{abs}"), &format!("src='{folder}/"));
+            // Cubre `/`, `\` y mezclas (`\` + `/`) que aparecen en Windows.
+            for sep1 in ["/", "\\"] {
+                for sep2 in ["/", "\\"] {
+                    let abs = format!("{prefix}{sep1}{folder}{sep2}");
+                    out = out.replace(&format!("]({abs}"), &format!("]({folder}/"));
+                    out = out.replace(&format!("src=\"{abs}"), &format!("src=\"{folder}/"));
+                    out = out.replace(&format!("src='{abs}"), &format!("src='{folder}/"));
+                }
             }
         }
     }
@@ -134,11 +137,11 @@ mod tests {
 
     #[test]
     fn relative_and_absolute_round_trip() {
-        let data = Path::new("/home/ana/.local/share/com.pluma.app");
-        let abs = "/home/ana/.local/share/com.pluma.app/images/foto.png";
-        let rel = to_relative(abs, data);
+        let data = std::env::temp_dir().join("pluma-assets-round-trip");
+        let abs = data.join("images").join("foto.png");
+        let rel = to_relative(&abs.to_string_lossy(), &data);
         assert_eq!(rel, "images/foto.png");
-        assert_eq!(to_absolute(&rel, data), PathBuf::from(abs));
+        assert_eq!(to_absolute(&rel, &data), abs);
     }
 
     #[test]
@@ -192,7 +195,12 @@ mod tests {
         .unwrap();
         let scene = Scene::new(&chapter.id, 1, None);
         let scene_id = scene.id.clone();
-        let image_abs = data.join("images/foto.png").to_string_lossy().into_owned();
+        // Mismo formato que persiste `persist_image_impl`: `/` incluso en Windows.
+        let image_abs = data
+            .join("images")
+            .join("foto.png")
+            .to_string_lossy()
+            .replace('\\', "/");
         let content = format!("Hola ![foto]({image_abs})");
         conn.execute(
             "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary,

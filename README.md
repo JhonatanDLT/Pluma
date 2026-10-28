@@ -98,6 +98,8 @@ con CI multiplataforma y checklist de firma/notarización.
 - **Buscar y reemplazar** en el editor (`Ctrl/Cmd+F`).
 - **Búsqueda full-text** en toda la novela (`Ctrl/Cmd+Shift+P`) con SQLite FTS5,
   ranking por relevancia y salto directo a la escena.
+- **Grafo de relaciones** en World Building: mapa force-directed de personajes,
+  búsqueda, zoom/pan y clic para abrir la ficha.
 - **Modo foco** (`Ctrl/Cmd+Shift+F`) para escribir sin distracciones.
 - **Tipografía del editor** configurable: tamaño, interlineado y ancho de columna.
 - **Proyectos recientes** y **apertura de archivos** por asociación o arrastrando

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { trapFocus } from "$lib/focusTrap";
+  import WorldGraph from "$lib/components/WorldGraph.svelte";
   import type { ChangeEntry, Character, Entity, Relationship } from "$lib/types";
 
   let {
@@ -34,7 +35,13 @@
     onclose: () => void;
   } = $props();
 
-  type Tab = "characters" | "relationships" | "factions" | "locations" | "log";
+  type Tab =
+    | "characters"
+    | "relationships"
+    | "graph"
+    | "factions"
+    | "locations"
+    | "log";
   let tab = $state<Tab>("characters");
   let selectedCharacterId = $state<string | null>(null);
   let search = $state("");
@@ -248,6 +255,9 @@
       <button class="tab" class:active={tab === "relationships"} onclick={() => (tab = "relationships")}>
         Relaciones
       </button>
+      <button class="tab" class:active={tab === "graph"} onclick={() => (tab = "graph")}>
+        Grafo
+      </button>
       <button class="tab" class:active={tab === "factions"} onclick={() => (tab = "factions")}>
         Facciones
       </button>
@@ -361,6 +371,15 @@
             </div>
           </div>
         {/if}
+      {:else if tab === "graph"}
+        <WorldGraph
+          {characters}
+          {relationships}
+          onselectcharacter={(id) => {
+            selectedCharacterId = id;
+            tab = "characters";
+          }}
+        />
       {:else if tab === "relationships"}
         {#if relationships.length === 0}
           <p class="wb-empty">Aún no hay relaciones detectadas.</p>

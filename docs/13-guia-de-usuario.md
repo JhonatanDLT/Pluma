@@ -78,7 +78,9 @@ Abre **Mundo** en la barra superior.
 2. Revisa las fichas. Puedes **editar** cualquier personaje o entidad.
 3. Pulsa **Enriquecer** (requiere Ollama o IA en la nube) para generar
    descripción, biografía, rasgos, objetivos y arco.
-4. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
+4. Abre la pestaña **Grafo** para ver el mapa de relaciones: arrastra nodos,
+   haz zoom/pan, busca un personaje y haz clic para abrir su ficha.
+5. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
 
 El análisis es **no destructivo**: analizar un capítulo no borra los personajes
 de los anteriores. Las fichas que edites a mano se conservan.

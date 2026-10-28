@@ -248,12 +248,16 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 
 ## 7. Fases
 
-### Fase 1 — Grafo MVP (1 sprint)
+### Fase 1 — Grafo MVP (✅ implementado)
 
-- `wiki_graph` con datos existentes: personajes, relaciones, facciones, lugares.
-- `WorldGraph.svelte`: force layout, filtros, clic a ficha, zoom/pan.
-- Sin cambios de esquema.
-- **Aceptación:** el grafo se dibuja, filtra y abre fichas; 100+ nodos fluido.
+- `WorldGraph.svelte`: force layout (`d3-force`), búsqueda, etiquetas, zoom,
+  pan, arrastre de nodos y clic para abrir la ficha.
+- Usa los `characters` y `relationships` ya cargados en World Building; sin
+  cambios de esquema ni consultas extra.
+- Pestaña **Grafo** dentro de World Building.
+- Nodos dimensionados por grado de relación; protagonistas en color de acento.
+- **Pendiente para la Fase 3:** nodos de facciones/lugares, afiliaciones,
+  presencia y clustering por facción (requiere `character_affiliation`).
 
 ### Fase 2 — Campos personalizados + IA con evidencia (1–2 sprints)
 

@@ -68,6 +68,8 @@ semántico.
   el texto con un chip flotante para volver.
 - **Plan de la Wiki** (`docs/14-wiki-grafo.md`): grafo de personajes,
   facciones y lugares, campos personalizados y enriquecimiento con evidencia.
+- **Grafo de relaciones (Fase 1):** pestaña «Grafo» en World Building con
+  force layout, búsqueda, zoom/pan, arrastre de nodos y clic para abrir la ficha.
 
 ### Corregido
 

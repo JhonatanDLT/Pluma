@@ -1,0 +1,41 @@
+name: Audit
+
+on:
+  schedule:
+    # Cada lunes a las 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "pnpm-lock.yaml"
+
+jobs:
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: npm audit (falla en high/critical)
+        run: pnpm audit --audit-level high
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # Informativo por ahora: se hará bloqueante cuando el backlog esté limpio.
+      - name: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock
+        continue-on-error: true

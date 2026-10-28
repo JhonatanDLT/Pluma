@@ -36,6 +36,8 @@ semántico.
   la restauración de versiones actualizan el editor en su sitio, conservando el
   scroll y recolocando el cursor.
 - `cargo clippy -D warnings` en CI y limpieza de los avisos existentes.
+- Workflow semanal de auditoría de dependencias (`pnpm audit` bloqueante,
+  `cargo audit` informativo).
 
 ### Corregido
 

@@ -148,7 +148,8 @@ criterio de aceptación.
 - Logging estructurado (TD-04). ✅
 - Ignorar/añadir al diccionario (TD-43). ✅
 - Corrección IA sin remontar el editor (TD-41). ✅
-- Audit de dependencias (TD-46). Pendiente.
+- Audit de dependencias (TD-46). ✅ (`pnpm audit` bloqueante; `cargo audit`
+  informativo en el workflow semanal).
 
 ### Sprint 7 — IA y distribución
 

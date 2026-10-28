@@ -14,8 +14,8 @@ use crate::export;
 use crate::extract;
 use crate::llm;
 use crate::models::{
-    AnalysisReport, Chapter, Character, Entity, NavEntry, Project, Relationship, Scene, SceneMeta,
-    SearchHit, SnapshotMeta,
+    AnalysisReport, Chapter, Character, CharacterFieldDef, CharacterFieldView, EnrichReport,
+    Entity, FieldSpec, NavEntry, Project, Relationship, Scene, SceneMeta, SearchHit, SnapshotMeta,
 };
 use crate::nlp;
 use crate::parser;
@@ -1163,49 +1163,375 @@ pub async fn analyze_project(
     })
 }
 
-/// Enriquece las descripciones de los personajes con un LLM local (Ollama).
+// ---------------------------------------------------------------------------
+// Campos de personaje
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
+pub fn list_field_defs(db: State<'_, Db>, project_id: String) -> Result<Vec<CharacterFieldDef>> {
+    let conn = lock(&db)?;
+    repo::list_field_defs(&conn, &project_id)
+}
+
+#[tauri::command]
+pub fn create_field_def(
+    db: State<'_, Db>,
+    project_id: String,
+    label: String,
+    field_type: String,
+    prompt_hint: Option<String>,
+) -> Result<CharacterFieldDef> {
+    let conn = lock(&db)?;
+    repo::create_field_def(
+        &conn,
+        &project_id,
+        &label,
+        &field_type,
+        prompt_hint.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn update_field_def(
+    db: State<'_, Db>,
+    id: String,
+    label: String,
+    field_type: String,
+    prompt_hint: Option<String>,
+    position: Option<i64>,
+) -> Result<CharacterFieldDef> {
+    let conn = lock(&db)?;
+    repo::update_field_def(
+        &conn,
+        &id,
+        &label,
+        &field_type,
+        prompt_hint.as_deref(),
+        position,
+    )
+}
+
+#[tauri::command]
+pub fn delete_field_def(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::delete_field_def(&conn, &id)
+}
+
+#[tauri::command]
+pub fn reorder_field_defs(db: State<'_, Db>, project_id: String, ids: Vec<String>) -> Result<()> {
+    let mut conn = lock(&db)?;
+    repo::reorder_field_defs(&mut conn, &project_id, &ids)
+}
+
+#[tauri::command]
+pub fn list_character_fields(
+    db: State<'_, Db>,
+    character_id: String,
+) -> Result<Vec<CharacterFieldView>> {
+    let conn = lock(&db)?;
+    repo::list_character_fields(&conn, &character_id)
+}
+
+#[tauri::command]
+pub fn set_character_field(
+    db: State<'_, Db>,
+    character_id: String,
+    field_id: String,
+    value: serde_json::Value,
+) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::set_character_field(&conn, &character_id, &field_id, &value)
+}
+
+#[tauri::command]
+pub fn accept_field_suggestion(
+    db: State<'_, Db>,
+    character_id: String,
+    field_id: String,
+) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::accept_field_suggestion(&conn, &character_id, &field_id)
+}
+
+#[tauri::command]
+pub fn reject_field_suggestion(
+    db: State<'_, Db>,
+    character_id: String,
+    field_id: String,
+) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::reject_field_suggestion(&conn, &character_id, &field_id)
+}
+
+/// Valida una propuesta del LLM y la guarda como sugerencia. La evidencia debe
+/// aparecer literalmente en el contexto; si no, no se acepta ningún valor.
+fn store_suggestion(
+    conn: &Connection,
+    character_id: &str,
+    field_id: &str,
+    field_type: &str,
+    suggestion: &crate::models::FieldSuggestion,
+    context: &str,
+    report: &mut EnrichReport,
+) -> Result<()> {
+    let evidence = suggestion
+        .evidence
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let valid_evidence = evidence
+        .map(|e| crate::fields::evidence_in_context(context, e))
+        .unwrap_or(false);
+
+    if !valid_evidence {
+        let reason = if evidence.is_some() {
+            "la cita no aparece en el texto"
+        } else {
+            "sin evidencia suficiente"
+        };
+        let stored = repo::set_field_suggestion(
+            conn,
+            character_id,
+            field_id,
+            None,
+            Some(0.0),
+            None,
+            Some(reason),
+        )?;
+        if stored {
+            report.insufficient += 1;
+        } else {
+            report.skipped += 1;
+        }
+        return Ok(());
+    }
+
+    let normalized = match suggestion.value.as_ref() {
+        Some(value) => crate::fields::normalize_value(field_type, value),
+        None => Ok(None),
+    };
+    let normalized = match normalized {
+        Ok(value) => value,
+        Err(_) => {
+            let stored = repo::set_field_suggestion(
+                conn,
+                character_id,
+                field_id,
+                None,
+                Some(0.0),
+                None,
+                Some("el modelo devolvió un valor con formato inválido"),
+            )?;
+            if stored {
+                report.insufficient += 1;
+            } else {
+                report.skipped += 1;
+            }
+            return Ok(());
+        }
+    };
+
+    if normalized.is_none() {
+        let stored = repo::set_field_suggestion(
+            conn,
+            character_id,
+            field_id,
+            None,
+            Some(0.0),
+            None,
+            Some(
+                suggestion
+                    .reason
+                    .as_deref()
+                    .unwrap_or("sin evidencia suficiente"),
+            ),
+        )?;
+        if stored {
+            report.insufficient += 1;
+        } else {
+            report.skipped += 1;
+        }
+        return Ok(());
+    }
+
+    let confidence = suggestion.confidence.unwrap_or(0.5).clamp(0.0, 1.0);
+    let stored = repo::set_field_suggestion(
+        conn,
+        character_id,
+        field_id,
+        normalized.as_ref(),
+        Some(confidence),
+        evidence,
+        suggestion.reason.as_deref(),
+    )?;
+    if stored {
+        report.suggested += 1;
+    } else {
+        report.skipped += 1;
+    }
+    Ok(())
+}
+
+fn run_enrichment(
+    app: &tauri::AppHandle,
+    db: &State<'_, Db>,
+    project_id: &str,
+    character_id: Option<&str>,
+    model: Option<&str>,
+) -> Result<EnrichReport> {
+    let settings = crate::settings::load(&settings_path(app)?);
+    let model_override = model.or(settings.llm_model.as_deref());
+    let backend = llm::resolve_backend(&settings, model_override, llm::DEFAULT_MODEL);
+
+    // Recoge los datos bajo el lock y libéralo antes de las llamadas de red.
+    let (texts, characters, defs) = {
+        let conn = lock(db)?;
+        let content = repo::get_project_content(&conn, project_id)?;
+        let texts: Vec<String> = content
+            .iter()
+            .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
+            .collect();
+        let characters = repo::list_characters(&conn, project_id)?;
+        let defs = repo::list_field_defs(&conn, project_id)?;
+        (texts, characters, defs)
+    };
+
+    let targets: Vec<&Character> = match character_id {
+        Some(id) => {
+            let c = characters
+                .iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| AppError::NotFound(format!("personaje {id}")))?;
+            vec![c]
+        }
+        None => characters.iter().collect(),
+    };
+
+    let field_targets: Vec<(String, FieldSpec)> = defs
+        .iter()
+        .filter(|d| !d.builtin || crate::fields::is_enrichable(&d.key))
+        .map(|d| {
+            (
+                d.id.clone(),
+                FieldSpec {
+                    key: d.key.clone(),
+                    label: d.label.clone(),
+                    field_type: d.field_type.clone(),
+                    prompt_hint: d.prompt_hint.clone(),
+                },
+            )
+        })
+        .collect();
+
+    let mut report = EnrichReport {
+        characters: targets.len(),
+        ..Default::default()
+    };
+    let mut attempted = 0usize;
+    let mut failed = 0usize;
+
+    for (index, character) in targets.iter().enumerate() {
+        emit_progress(app, index, targets.len(), "enriqueciendo");
+        let context = llm::context_for(&character.name, &texts);
+
+        if crate::fields::normalize_text(&context).chars().count() < 120 {
+            let conn = lock(db)?;
+            for (field_id, _) in &field_targets {
+                let stored = repo::set_field_suggestion(
+                    &conn,
+                    &character.id,
+                    field_id,
+                    None,
+                    Some(0.0),
+                    None,
+                    Some("sin evidencia suficiente"),
+                )?;
+                if stored {
+                    report.insufficient += 1;
+                } else {
+                    report.skipped += 1;
+                }
+            }
+            continue;
+        }
+
+        attempted += 1;
+        let suggestions = match llm::suggest_character_fields(
+            &backend,
+            &character.name,
+            &context,
+            &field_targets
+                .iter()
+                .map(|(_, spec)| spec.clone())
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(suggestions) => suggestions,
+            Err(error) => {
+                failed += 1;
+                log::warn!("enriquecimiento de {} falló: {error}", character.name);
+                report.skipped += field_targets.len();
+                continue;
+            }
+        };
+
+        let conn = lock(db)?;
+        for (field_id, spec) in &field_targets {
+            let Some(suggestion) = suggestions.get(&spec.key) else {
+                report.skipped += 1;
+                continue;
+            };
+            store_suggestion(
+                &conn,
+                &character.id,
+                field_id,
+                &spec.field_type,
+                suggestion,
+                &context,
+                &mut report,
+            )?;
+        }
+    }
+
+    if attempted > 0 && failed == attempted {
+        return Err(AppError::Internal(
+            "no se pudo contactar con el modelo de IA; revisa Ollama o la configuración de la nube"
+                .into(),
+        ));
+    }
+
+    emit_progress(app, targets.len(), targets.len(), "completado");
+    Ok(report)
+}
+
+/// Genera sugerencias con evidencia para todos los personajes. No sobrescribe
+/// valores manuales: las propuestas quedan pendientes de aceptar o descartar.
+#[tauri::command(async)]
 pub fn enrich_project(
     app: tauri::AppHandle,
     db: State<'_, Db>,
     project_id: String,
     model: Option<String>,
-) -> Result<Vec<Character>> {
-    let settings = crate::settings::load(&settings_path(&app)?);
-    let model_override = model.as_deref().or(settings.llm_model.as_deref());
-    let backend = llm::resolve_backend(&settings, model_override, llm::DEFAULT_MODEL);
+) -> Result<EnrichReport> {
+    run_enrichment(&app, &db, &project_id, None, model.as_deref())
+}
 
-    // Recoge los datos bajo el lock y libéralo antes de las llamadas de red.
-    // Así el autoguardado no se queda esperando a que termine el LLM.
-    let (texts, characters) = {
-        let conn = lock(&db)?;
-        let content = repo::get_project_content(&conn, &project_id)?;
-        let texts: Vec<String> = content
-            .iter()
-            .flat_map(|(_, scenes)| scenes.iter().map(|s| s.content_markdown.clone()))
-            .collect();
-        let characters = repo::list_characters(&conn, &project_id)?;
-        (texts, characters)
-    };
-
-    for c in &characters {
-        let context = llm::context_for(&c.name, &texts);
-        let profile = llm::describe_character(&backend, &c.name, &context)?;
-        // El lock se toma solo para persistir el perfil, no durante la red.
-        let conn = lock(&db)?;
-        repo::update_character_profile(
-            &conn,
-            &c.id,
-            profile.description.as_deref(),
-            profile.biography.as_deref(),
-            &profile.traits,
-            &profile.goals,
-            profile.arc.as_deref(),
-        )?;
-    }
-
-    let conn = lock(&db)?;
-    repo::list_characters(&conn, &project_id)
+/// Genera sugerencias con evidencia para un único personaje.
+#[tauri::command(async)]
+pub fn enrich_character_fields(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    project_id: String,
+    character_id: String,
+    model: Option<String>,
+) -> Result<EnrichReport> {
+    run_enrichment(
+        &app,
+        &db,
+        &project_id,
+        Some(&character_id),
+        model.as_deref(),
+    )
 }
 
 /// Corrige gramática, ortografía y puntuación con un LLM local (Ollama).

@@ -18,6 +18,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0008_level_names.sql"),
     include_str!("../migrations/0009_embeddings.sql"),
     include_str!("../migrations/0010_fts.sql"),
+    include_str!("../migrations/0011_character_fields.sql"),
 ];
 
 /// Máximo de conexiones reutilizables. SQLite en WAL permite lectores
@@ -170,6 +171,50 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+
+        drop(conn);
+        drop(db);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn upgrades_a_v10_database_and_seeds_builtin_fields() {
+        let dir = std::env::temp_dir().join(format!("pluma-db-upgrade-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.db");
+
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+            for (index, sql) in MIGRATIONS.iter().take(10).enumerate() {
+                let tx = conn.transaction().unwrap();
+                tx.execute_batch(sql).unwrap();
+                tx.pragma_update(None, "user_version", (index + 1) as i64)
+                    .unwrap();
+                tx.commit().unwrap();
+            }
+            conn.execute(
+                "INSERT INTO project (id, title, created_at, updated_at)
+                 VALUES ('p1', 'Antigua', '2024-01-01', '2024-01-01')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = Db::open(&path).unwrap();
+        let conn = db.get().unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+        let fields: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM character_field_def WHERE project_id = 'p1' AND builtin = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fields, 9);
 
         drop(conn);
         drop(db);

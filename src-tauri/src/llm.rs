@@ -411,7 +411,9 @@ fn parse_anthropic_response(body: &str) -> Result<String> {
         .ok_or_else(|| AppError::Internal("respuesta de Anthropic sin contenido".into()))
 }
 
-/// Perfil completo de un personaje generado por el LLM.
+/// Perfil completo de un personaje generado por el LLM (formato heredado,
+/// conservado para validar respuestas y pruebas de compatibilidad).
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct CharacterProfile {
     #[serde(default)]
@@ -426,34 +428,96 @@ pub struct CharacterProfile {
     pub arc: Option<String>,
 }
 
-/// Genera la ficha completa de un personaje (descripción, biografía, rasgos,
-/// objetivos y arco) a partir de su contexto, con salida JSON estructurada.
-pub fn describe_character(
+/// Pide al LLM una propuesta por cada campo, con evidencia textual obligatoria.
+///
+/// La respuesta debe ser un objeto JSON cuya clave es la `key` del campo y cuyo
+/// valor es `{value, confidence, evidence, reason}`. Un campo sin evidencia
+/// suficiente debe devolver `value: null` y un `reason`.
+pub fn suggest_character_fields(
     backend: &Backend,
     name: &str,
     context: &str,
-) -> Result<CharacterProfile> {
-    let context = truncate(context, 4000);
+    fields: &[crate::models::FieldSpec],
+) -> Result<std::collections::HashMap<String, crate::models::FieldSuggestion>> {
+    if fields.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let context = truncate(context, 6000);
+    let field_list = fields
+        .iter()
+        .map(|f| {
+            let hint = f
+                .prompt_hint
+                .as_deref()
+                .map(|h| format!(" (indicio: {})", truncate(h, 180)))
+                .unwrap_or_default();
+            format!("- {} ({}) [{}]{}", f.key, f.label, f.field_type, hint)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
     let prompt = format!(
-        "Eres un asistente de escritura literaria. Basándote en el siguiente texto, \
-         genera una ficha del personaje \"{name}\". Responde solo con JSON válido \
-         (sin texto adicional ni comillas), con este formato:\n\
-         {{\"description\":\"descripción breve\",\"biography\":\"biografía\",\
-         \"traits\":[\"rasgo1\",\"rasgo2\"],\"goals\":[\"objetivo1\"],\"arc\":\"arco narrativo\"}}\n\n\
-         Texto:\n{context}"
+        "Eres un analista literario riguroso. A partir del TEXTO, propone valores para \
+         la ficha del personaje \"{name}\".\n\
+         Reglas:\n\
+         1. Usa solo información presente en el texto. No inventes ni deduzcas datos externos.\n\
+         2. Cada campo debe incluir una cita literal y breve del texto como \"evidence\".\n\
+         3. Si el texto no contiene información suficiente para un campo, devuelve \
+         \"value\": null, \"confidence\": 0 y \"reason\": \"sin evidencia suficiente\".\n\
+         4. \"confidence\" es un número entre 0 y 1.\n\
+         5. Para listas usa un array de cadenas cortas. Para números usa un número.\n\
+         6. No incluyas texto fuera del JSON.\n\n\
+         Campos (clave [tipo] indicio):\n{field_list}\n\n\
+         Formato exacto:\n\
+         {{\"clave\":{{\"value\":\"…\",\"confidence\":0.8,\"evidence\":\"cita literal\",\"reason\":null}}}}\n\n\
+         TEXTO:\n{context}"
     );
+
     let raw = backend.generate_json(&prompt)?;
     let json = extract_json(&raw);
-    serde_json::from_str(&json).map_err(|e| {
-        AppError::Internal(format!("el modelo no devolvió una ficha JSON válida: {e}"))
-    })
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(|e| {
+        AppError::Internal(format!(
+            "el modelo no devolvió un JSON de campos válido: {e}"
+        ))
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        AppError::Internal("el modelo no devolvió un objeto JSON de campos".into())
+    })?;
+
+    let mut out = std::collections::HashMap::new();
+    for field in fields {
+        let Some(entry) = object.get(&field.key) else {
+            continue;
+        };
+        // Tolera modelos pequeños que devuelven directamente el valor.
+        let suggestion = if entry.is_object() {
+            serde_json::from_value::<crate::models::FieldSuggestion>(entry.clone()).unwrap_or(
+                crate::models::FieldSuggestion {
+                    value: None,
+                    confidence: None,
+                    evidence: None,
+                    reason: Some("respuesta con formato inválido".into()),
+                },
+            )
+        } else {
+            crate::models::FieldSuggestion {
+                value: Some(entry.clone()),
+                confidence: Some(0.3),
+                evidence: None,
+                reason: Some("el modelo no citó evidencia".into()),
+            }
+        };
+        out.insert(field.key.clone(), suggestion);
+    }
+    Ok(out)
 }
 
 /// Construye el contexto (escenas que mencionan al personaje).
 pub fn context_for(name: &str, texts: &[String]) -> String {
+    let needle = crate::repo::normalize_key(name);
     let mut out = String::new();
     for text in texts {
-        if text.to_lowercase().contains(&name.to_lowercase()) {
+        if !needle.is_empty() && crate::repo::normalize_key(text).contains(&needle) {
             out.push_str(text);
             out.push_str("\n\n");
         }

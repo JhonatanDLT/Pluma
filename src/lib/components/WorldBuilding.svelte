@@ -1,14 +1,18 @@
 <script lang="ts">
   import { trapFocus } from "$lib/focusTrap";
   import WorldGraph from "$lib/components/WorldGraph.svelte";
+  import FieldManager from "$lib/components/FieldManager.svelte";
+  import CharacterFields from "$lib/components/CharacterFields.svelte";
   import type { ChangeEntry, Character, Entity, Relationship } from "$lib/types";
 
   let {
+    projectId,
     characters,
     relationships,
     entities,
     analyzing,
     enriching,
+    enrichVersion = 0,
     progress,
     changeLog,
     onanalyze,
@@ -17,13 +21,16 @@
     ondeleteentity,
     onupdatecharacter,
     onupdateentity,
+    onreloadcharacters,
     onclose,
   }: {
+    projectId: string;
     characters: Character[];
     relationships: Relationship[];
     entities: Entity[];
     analyzing: boolean;
     enriching: boolean;
+    enrichVersion?: number;
     progress: { done: number; total: number; phase: string } | null;
     changeLog: ChangeEntry[];
     onanalyze: () => void;
@@ -32,6 +39,7 @@
     ondeleteentity: (id: string) => void;
     onupdatecharacter: (character: Character) => void | Promise<void>;
     onupdateentity: (entity: Entity) => void | Promise<void>;
+    onreloadcharacters: () => void | Promise<void>;
     onclose: () => void;
   } = $props();
 
@@ -39,12 +47,14 @@
     | "characters"
     | "relationships"
     | "graph"
+    | "fields"
     | "factions"
     | "locations"
     | "log";
   let tab = $state<Tab>("characters");
   let selectedCharacterId = $state<string | null>(null);
   let search = $state("");
+  let fieldsVersion = $state(0);
 
   let editingCharacter = $state<Character | null>(null);
   let editingEntity = $state<Entity | null>(null);
@@ -217,9 +227,9 @@
           class="btn"
           onclick={onenrich}
           disabled={enriching || characters.length === 0}
-          title="Genera descripciones con un LLM local (Ollama)"
+          title="Propone valores con cita textual; nunca pisa lo que ya escribiste"
         >
-          {enriching ? "Enriqueciendo…" : "Enriquecer"}
+          {enriching ? "Buscando…" : "Sugerencias IA"}
         </button>
         <button class="btn-icon" title="Cerrar" onclick={onclose}>×</button>
       </div>
@@ -233,7 +243,7 @@
       />
     </div>
 
-    {#if analyzing}
+    {#if analyzing || enriching}
       <div class="wb-progress">
         <div class="progress-bar">
           <div class="progress-fill" style:width="{progressPct}%"></div>
@@ -242,8 +252,12 @@
           {progress
             ? progress.phase === "informe"
               ? "Generando informe…"
-              : `Escenas ${progress.done}/${progress.total}`
-            : "Analizando…"}
+              : progress.phase === "enriqueciendo"
+                ? `Personajes ${progress.done}/${progress.total}`
+                : `Escenas ${progress.done}/${progress.total}`
+            : enriching
+              ? "Buscando sugerencias…"
+              : "Analizando…"}
         </span>
       </div>
     {/if}
@@ -257,6 +271,9 @@
       </button>
       <button class="tab" class:active={tab === "graph"} onclick={() => (tab = "graph")}>
         Grafo
+      </button>
+      <button class="tab" class:active={tab === "fields"} onclick={() => (tab = "fields")}>
+        Campos
       </button>
       <button class="tab" class:active={tab === "factions"} onclick={() => (tab = "factions")}>
         Facciones
@@ -317,26 +334,12 @@
                 {#if selectedCharacter.role}
                   <span class="wb-role">{selectedCharacter.role}</span>
                 {/if}
-                <dl>
-                  {#if selectedCharacter.aliases.length > 0}
-                    <div><dt>Alias</dt><dd>{selectedCharacter.aliases.join(", ")}</dd></div>
-                  {/if}
-                  {#if selectedCharacter.description}
-                    <div><dt>Descripción</dt><dd>{selectedCharacter.description}</dd></div>
-                  {/if}
-                  {#if selectedCharacter.biography}
-                    <div><dt>Biografía</dt><dd>{selectedCharacter.biography}</dd></div>
-                  {/if}
-                  {#if selectedCharacter.traits.length > 0}
-                    <div><dt>Rasgos</dt><dd>{selectedCharacter.traits.join(", ")}</dd></div>
-                  {/if}
-                  {#if selectedCharacter.goals.length > 0}
-                    <div><dt>Objetivos</dt><dd>{selectedCharacter.goals.join(", ")}</dd></div>
-                  {/if}
-                  {#if selectedCharacter.arc}
-                    <div><dt>Arco</dt><dd>{selectedCharacter.arc}</dd></div>
-                  {/if}
-                </dl>
+                <CharacterFields
+                  character={selectedCharacter}
+                  {projectId}
+                  refreshKey={fieldsVersion + enrichVersion}
+                  onreload={onreloadcharacters}
+                />
                 <div class="wb-profile-rel">
                   <h4>Relaciones</h4>
                   {#if relationshipsFor(selectedCharacter.id).length === 0}
@@ -380,6 +383,8 @@
             tab = "characters";
           }}
         />
+      {:else if tab === "fields"}
+        <FieldManager {projectId} onchanged={() => (fieldsVersion += 1)} />
       {:else if tab === "relationships"}
         {#if relationships.length === 0}
           <p class="wb-empty">Aún no hay relaciones detectadas.</p>
@@ -739,28 +744,6 @@
     color: var(--accent);
     font-weight: 600;
     font-size: 13px;
-  }
-
-  .wb-detail dl {
-    margin: 8px 0 0;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .wb-detail dt {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    margin-bottom: 2px;
-  }
-
-  .wb-detail dd {
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.6;
   }
 
   .wb-rel {

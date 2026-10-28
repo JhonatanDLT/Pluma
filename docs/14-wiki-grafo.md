@@ -6,17 +6,17 @@ la IA pueda rellenar con evidencia, sin inventar.
 
 ---
 
-## 1. Estado actual y límites
+## 1. Estado inicial y límites (antes de las fases 1–2)
 
-La base ya tiene:
+La base ya tenía:
 
 - `character`: nombre, alias, rol, descripción, biografía, rasgos, objetivos,
   arco y color.
 - `entity`: lugares y facciones con alias, descripción y menciones.
 - `relationship`: personaje A ↔ personaje B, tipo, intensidad y descripción.
-- `enrich_project`: pide al LLM una ficha y actualiza los campos del personaje.
+- `enrich_project`: pedía al LLM una ficha y escribía directamente los campos.
 
-Problemas:
+Problemas detectados:
 
 1. **El enriquecimiento no siempre llena todos los campos.** El modelo pequeño
    suele devolver solo `description`; biografía, rasgos, objetivos y arco quedan
@@ -53,7 +53,7 @@ Problemas:
 Los campos actuales de `character` se conservan como columnas de primera clase
 para no romper datos ni consultas. La UI los presenta como campos “base”.
 
-### 3.2 Campos personalizados (migración `0011_wiki_fields.sql`)
+### 3.2 Campos personalizados (migración `0011_character_fields.sql`)
 
 ```sql
 CREATE TABLE character_field_def (
@@ -61,24 +61,32 @@ CREATE TABLE character_field_def (
     project_id  TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
     key         TEXT NOT NULL,              -- slug estable, p. ej. "color_ojos"
     label       TEXT NOT NULL,              -- "Color de ojos"
-    field_type  TEXT NOT NULL DEFAULT 'text', -- text | longtext | list | number | date | enum
-    options_json TEXT,                      -- para enum
+    field_type  TEXT NOT NULL DEFAULT 'text', -- text | longtext | list | number
+    options_json TEXT,
     prompt_hint TEXT,                       -- "solo si se menciona explícitamente"
     position    INTEGER NOT NULL DEFAULT 0,
+    builtin     INTEGER NOT NULL DEFAULT 0, -- 1 = campo base de `character`
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
-    UNIQUE(project_id, key)
+    UNIQUE(project_id, key),
+    UNIQUE(project_id, id)
 );
 
 CREATE TABLE character_field_value (
-    character_id TEXT NOT NULL REFERENCES character(id) ON DELETE CASCADE,
-    field_id     TEXT NOT NULL REFERENCES character_field_def(id) ON DELETE CASCADE,
-    value_json   TEXT NOT NULL,             -- string, lista o número serializado
+    project_id   TEXT NOT NULL,
+    character_id TEXT NOT NULL,
+    field_id     TEXT NOT NULL,
+    value_json   TEXT NOT NULL,             -- string, lista, número o "null"
     source       TEXT NOT NULL DEFAULT 'manual', -- manual | ai
-    confidence   REAL,                      -- 0..1 cuando source = ai
-    evidence     TEXT,                      -- cita del manuscrito
+    confidence   REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+    evidence     TEXT,                      -- cita literal del manuscrito
+    reason       TEXT,                      -- "sin evidencia suficiente", etc.
     updated_at   TEXT NOT NULL,
-    PRIMARY KEY (character_id, field_id)
+    PRIMARY KEY (character_id, field_id),
+    FOREIGN KEY (project_id, character_id)
+        REFERENCES character(project_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id, field_id)
+        REFERENCES character_field_def(project_id, id) ON DELETE CASCADE
 );
 ```
 
@@ -87,9 +95,17 @@ Reglas:
 - `source = manual` **nunca** se sobrescribe con una sugerencia `ai`.
 - Las sugerencias de IA se guardan con `source = ai` y se pueden aceptar
   (pasan a `manual`) o descartar.
+- Los campos base también tienen una definición (`builtin = 1`) para que la UI
+  los trate igual y para guardar sugerencias pendientes. Al aceptar una
+  sugerencia se escribe la columna de `character`.
+- Si el campo base ya tiene valor, `set_field_suggestion` ignora la propuesta.
 - `key` es estable y no cambia al renombrar `label`.
-- `field_type` empieza con `text`, `longtext`, `list`, `number`; `enum`/`date`
-  en una fase posterior.
+- `field_type` admite `text`, `longtext`, `list` y `number`.
+- La migración siembra las definiciones base de los proyectos existentes; los
+  proyectos nuevos las crean al darse de alta.
+- Borrar un campo personalizado borra sus valores (cascada). Los campos base no
+  se pueden renombrar ni eliminar.
+- Duplicar o restaurar un proyecto copia campos personalizados y valores.
 
 ### 3.3 Afiliaciones y grafo (migración `0012_wiki_graph.sql`)
 
@@ -224,9 +240,11 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 
 ### 5.4 Modelo
 
-- Local: Qwen 1.5B/4B en modo JSON, temperatura 0.
+- Local: Qwen 1.5B/4B en modo JSON.
 - Nube: opcional, con consentimiento; mismo esquema.
 - Validación y evidencia son obligatorias, independientemente del modelo.
+- Cada personaje se procesa de forma aislada: un fallo de formato no aborta el
+  lote; ese personaje cuenta como omitido y se registra en el log.
 
 ---
 
@@ -238,7 +256,9 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 | `create_field_def(...)` / `update_field_def` / `delete_field_def` | CRUD |
 | `list_character_fields(character_id)` | Valores built-in + custom |
 | `set_character_field(character_id, field_id, value)` | Edición manual |
-| `enrich_character(project_id, character_id, model)` | Sugerencias con evidencia |
+| `accept_field_suggestion(character_id, field_id)` | Acepta una propuesta |
+| `reject_field_suggestion(character_id, field_id)` | Descarta una propuesta |
+| `enrich_character_fields(project_id, character_id, model)` | Sugerencias con evidencia |
 | `enrich_project(project_id, model)` | Sugerencias para todos |
 | `wiki_graph(project_id)` | Nodos y aristas |
 | `list_affiliations(project_id)` / `set_affiliation(...)` | Afiliaciones |
@@ -259,13 +279,26 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 - **Pendiente para la Fase 3:** nodos de facciones/lugares, afiliaciones,
   presencia y clustering por facción (requiere `character_affiliation`).
 
-### Fase 2 — Campos personalizados + IA con evidencia (1–2 sprints)
+### Fase 2 — Campos personalizados + IA con evidencia (✅ implementado)
 
-- Migración `0011`; definiciones y valores; editor de campos en la ficha.
-- Prompt extendido (built-in + custom), validación, evidencia y confianza.
-- Sugerencias aceptar/descartar; manual gana.
-- **Aceptación:** el autor añade un campo, la IA lo rellena con cita, y lo
-  manual sobrevive a un reanálisis.
+- Migración `0011_character_fields.sql`: definiciones base + personalizadas,
+  valores con `source`, `confidence`, `evidence` y `reason`.
+- Repo: `list/create/update/delete_field_def`, `reorder_field_defs`,
+  `list_character_fields`, `set_character_field`,
+  `set_field_suggestion`, `accept/reject_field_suggestion`.
+- IA: `llm::suggest_character_fields` pide un objeto JSON por campo
+  (`{value, confidence, evidence, reason}`); cada cita se valida contra el
+  contexto normalizado (sin tildes, minúsculas y espacios). Sin cita válida no
+  hay valor: se guarda «sin evidencia suficiente».
+- `enrich_project` ya no sobrescribe la ficha: guarda propuestas pendientes.
+  `enrich_character_fields` permite re-enriquecer un solo personaje.
+- UI: pestaña **Campos** (`FieldManager.svelte`) para crear, renombrar,
+  reordenar y borrar campos; la ficha del personaje
+  (`CharacterFields.svelte`) muestra valores base + personalizados, sugerencias
+  con cita, confianza y botones Aceptar/Descartar.
+- Duplicar y restaurar proyectos conserva los campos personalizados.
+- **Aceptación:** el autor añade un campo, la IA lo rellena con cita y lo
+  manual sobrevive a un reanálisis. ✔
 
 ### Fase 3 — Afiliaciones y grafo enriquecido (1 sprint)
 

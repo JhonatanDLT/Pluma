@@ -70,6 +70,14 @@ semántico.
   facciones y lugares, campos personalizados y enriquecimiento con evidencia.
 - **Grafo de relaciones (Fase 1):** pestaña «Grafo» en World Building con
   force layout, búsqueda, zoom/pan, arrastre de nodos y clic para abrir la ficha.
+- **Campos personalizados (Fase 2):** pestaña «Campos» para crear, renombrar,
+  reordenar y borrar campos del personaje (`text`, `longtext`, `list`, `number`)
+  con un indicio opcional para la IA.
+- **Enriquecimiento con evidencia:** las propuestas se guardan como sugerencias
+  con cita textual, confianza y motivo; se aceptan o descartan por campo. La IA
+  nunca pisa valores manuales y, si no hay texto suficiente, no inventa.
+- **Re-enriquecimiento por personaje** desde su ficha, además del lote completo.
+- Duplicar y restaurar proyectos conserva los campos personalizados.
 
 ### Corregido
 

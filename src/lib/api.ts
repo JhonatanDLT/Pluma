@@ -4,7 +4,10 @@ import type {
   BackupInfo,
   Chapter,
   Character,
+  CharacterFieldDef,
+  CharacterFieldView,
   CloudProviderInfo,
+  EnrichReport,
   Entity,
   IaSettings,
   IaStatus,
@@ -193,7 +196,63 @@ export const updateEntity = (
 export const analyzeProject = (projectId: string, chapterId: string | null) =>
   invoke<AnalysisReport>("analyze_project", { projectId, chapterId });
 export const enrichProject = (projectId: string, model: string | null) =>
-  invoke<Character[]>("enrich_project", { projectId, model });
+  invoke<EnrichReport>("enrich_project", { projectId, model });
+export const enrichCharacterFields = (
+  projectId: string,
+  characterId: string,
+  model: string | null = null,
+) =>
+  invoke<EnrichReport>("enrich_character_fields", {
+    projectId,
+    characterId,
+    model,
+  });
+
+// Campos de personaje (base + personalizados con procedencia y evidencia)
+export const listFieldDefs = (projectId: string) =>
+  invoke<CharacterFieldDef[]>("list_field_defs", { projectId });
+export const createFieldDef = (
+  projectId: string,
+  label: string,
+  fieldType: string,
+  promptHint: string | null,
+) =>
+  invoke<CharacterFieldDef>("create_field_def", {
+    projectId,
+    label,
+    fieldType,
+    promptHint,
+  });
+export const updateFieldDef = (
+  id: string,
+  label: string,
+  fieldType: string,
+  promptHint: string | null,
+  position: number | null = null,
+) =>
+  invoke<CharacterFieldDef>("update_field_def", {
+    id,
+    label,
+    fieldType,
+    promptHint,
+    position,
+  });
+export const deleteFieldDef = (id: string) =>
+  invoke<void>("delete_field_def", { id });
+export const reorderFieldDefs = (projectId: string, ids: string[]) =>
+  invoke<void>("reorder_field_defs", { projectId, ids });
+export const listCharacterFields = (characterId: string) =>
+  invoke<CharacterFieldView[]>("list_character_fields", { characterId });
+export const setCharacterField = (
+  characterId: string,
+  fieldId: string,
+  value: string | string[] | number | null,
+) =>
+  invoke<void>("set_character_field", { characterId, fieldId, value });
+export const acceptFieldSuggestion = (characterId: string, fieldId: string) =>
+  invoke<void>("accept_field_suggestion", { characterId, fieldId });
+export const rejectFieldSuggestion = (characterId: string, fieldId: string) =>
+  invoke<void>("reject_field_suggestion", { characterId, fieldId });
 export const correctText = (text: string, model: string | null) =>
   invoke<string>("correct_text", { text, model });
 export const chat = (message: string, model: string | null, projectId: string | null) =>

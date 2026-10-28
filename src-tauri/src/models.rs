@@ -227,6 +227,98 @@ pub struct NavEntry {
     pub scene_title: Option<String>,
 }
 
+/// Campos base de personaje: `(key, label, field_type)`.
+pub const BUILTIN_FIELDS: &[(&str, &str, &str)] = &[
+    ("name", "Nombre", "text"),
+    ("aliases", "Alias", "list"),
+    ("role", "Rol", "text"),
+    ("description", "Descripción", "longtext"),
+    ("biography", "Biografía", "longtext"),
+    ("traits", "Rasgos", "list"),
+    ("goals", "Objetivos", "list"),
+    ("arc", "Arco", "longtext"),
+    ("color", "Color", "text"),
+];
+
+/// Definición de un campo de personaje (base o personalizado).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterFieldDef {
+    pub id: String,
+    pub project_id: String,
+    pub key: String,
+    pub label: String,
+    pub field_type: String,
+    pub options: Vec<String>,
+    pub prompt_hint: Option<String>,
+    pub position: i64,
+    pub builtin: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Vista fusionada de un campo para la ficha: valor aceptado + procedencia.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterFieldView {
+    pub field_id: String,
+    pub key: String,
+    pub label: String,
+    pub field_type: String,
+    pub options: Vec<String>,
+    pub prompt_hint: Option<String>,
+    pub builtin: bool,
+    pub value: Option<serde_json::Value>,
+    /// `manual` | `ai` | `none`
+    pub source: String,
+    pub confidence: Option<f64>,
+    pub evidence: Option<String>,
+    pub reason: Option<String>,
+}
+
+/// Fila cruda de valores (para snapshots y duplicados).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterFieldValue {
+    pub project_id: String,
+    pub character_id: String,
+    pub field_id: String,
+    pub value_json: String,
+    pub source: String,
+    pub confidence: Option<f64>,
+    pub evidence: Option<String>,
+    pub reason: Option<String>,
+    pub updated_at: String,
+}
+
+/// Descripción de un campo que se envía al LLM.
+#[derive(Debug, Clone, Serialize)]
+pub struct FieldSpec {
+    pub key: String,
+    pub label: String,
+    pub field_type: String,
+    pub prompt_hint: Option<String>,
+}
+
+/// Resumen de un enriquecimiento por campos.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EnrichReport {
+    pub characters: usize,
+    pub suggested: usize,
+    pub insufficient: usize,
+    pub skipped: usize,
+}
+
+/// Salida estructurada del LLM para un campo.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FieldSuggestion {
+    #[serde(default)]
+    pub value: Option<serde_json::Value>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+    #[serde(default)]
+    pub evidence: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 /// Resultado de una búsqueda full-text en las escenas de un proyecto.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {

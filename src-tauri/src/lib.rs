@@ -6,6 +6,7 @@ mod engines;
 mod error;
 mod export;
 mod extract;
+mod fields;
 mod llm;
 mod models;
 mod nlp;
@@ -152,6 +153,16 @@ pub fn run() {
             commands::delete_backup,
             commands::persist_image,
             commands::list_characters,
+            commands::list_field_defs,
+            commands::create_field_def,
+            commands::update_field_def,
+            commands::delete_field_def,
+            commands::reorder_field_defs,
+            commands::list_character_fields,
+            commands::set_character_field,
+            commands::accept_field_suggestion,
+            commands::reject_field_suggestion,
+            commands::enrich_character_fields,
             commands::list_relationships,
             commands::update_character,
             commands::delete_character,

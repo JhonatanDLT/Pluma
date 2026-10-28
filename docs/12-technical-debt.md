@@ -108,6 +108,8 @@ criterio de aceptación.
 | TD-52 | Sin guía de usuario. | Curva de entrada. | P1 | 2d | ✅ `docs/13-guia-de-usuario.md`. |
 | TD-53 | Sin doc del sistema de diseño. | Inconsistencia visual futura. | P2 | 1d | `docs/13-diseno-ui.md` con tokens y componentes. |
 | TD-54 | Sin política de terceros generada automáticamente. | Riesgo legal. | P2 | 1d | `cargo about` + `pnpm licenses` en CI. |
+| TD-55 | Los campos personalizados solo admiten `text`, `longtext`, `list` y `number`. | No se pueden modelar fechas, enums ni referencias a otras fichas. | P2 | 2d | Añadir `date`, `enum` (con `options_json`) y validación/UI específicas. |
+| TD-56 | Las sugerencias de IA se guardan en la BD del proyecto sin historial ni auditoría. | No se puede revisar qué propuso el modelo ni cuándo. | P2 | 2d | Tabla de historial o exportación de sugerencias; registrar modelo y fecha sin contenido sensible. |
 
 ---
 

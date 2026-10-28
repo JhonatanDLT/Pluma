@@ -95,6 +95,7 @@
   let analyzing = $state(false);
   let analyzeProgress = $state<{ done: number; total: number; phase: string } | null>(null);
   let enriching = $state(false);
+  let enrichVersion = $state(0);
   let correcting = $state(false);
   let editorRevision = $state(0);
   let iaStatus = $state<IaStatus | null>(null);
@@ -1025,13 +1026,23 @@
     if (!selectedProjectId) return;
     enriching = true;
     try {
-      characters = await api.enrichProject(selectedProjectId, null);
-      logChange(`Enriquecimiento: ${characters.length} descripciones generadas`);
+      const report = await api.enrichProject(selectedProjectId, null);
+      enrichVersion += 1;
+      const parts = [`${report.characters} personajes`];
+      if (report.suggested) parts.push(`${report.suggested} propuestas`);
+      if (report.insufficient) parts.push(`${report.insufficient} sin evidencia`);
+      if (report.skipped) parts.push(`${report.skipped} omitidas`);
+      logChange(`Sugerencias IA: ${parts.join(", ")}`);
     } catch (e) {
       reportError(e);
     } finally {
       enriching = false;
     }
+  }
+
+  async function reloadCharacters() {
+    if (!selectedProjectId) return;
+    characters = await api.listCharacters(selectedProjectId);
   }
 
   async function loadIaStatus() {
@@ -1889,11 +1900,13 @@
 
   {#if worldOpen}
     <WorldBuilding
+      projectId={selectedProjectId ?? ""}
       {characters}
       {relationships}
       {entities}
       {analyzing}
       {enriching}
+      {enrichVersion}
       progress={analyzeProgress}
       {changeLog}
       onanalyze={analyze}
@@ -1902,6 +1915,7 @@
       ondeleteentity={deleteEntity}
       onupdatecharacter={updateCharacter}
       onupdateentity={updateEntity}
+      onreloadcharacters={reloadCharacters}
       onclose={() => (worldOpen = false)}
     />
   {/if}

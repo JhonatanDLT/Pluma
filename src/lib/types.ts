@@ -62,6 +62,44 @@ export interface Character {
   updated_at: string;
 }
 
+export type FieldType = "text" | "longtext" | "list" | "number";
+
+export interface CharacterFieldDef {
+  id: string;
+  project_id: string;
+  key: string;
+  label: string;
+  field_type: FieldType;
+  options: string[];
+  prompt_hint: string | null;
+  position: number;
+  builtin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CharacterFieldView {
+  field_id: string;
+  key: string;
+  label: string;
+  field_type: FieldType;
+  options: string[];
+  prompt_hint: string | null;
+  builtin: boolean;
+  value: string | string[] | number | null;
+  source: "manual" | "ai" | "none";
+  confidence: number | null;
+  evidence: string | null;
+  reason: string | null;
+}
+
+export interface EnrichReport {
+  characters: number;
+  suggested: number;
+  insufficient: number;
+  skipped: number;
+}
+
 export interface Relationship {
   id: string;
   project_id: string;

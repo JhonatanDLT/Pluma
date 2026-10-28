@@ -93,13 +93,17 @@ con CI multiplataforma y checklist de firma/notarización.
 - **Estilo** minimalista y elegante (paleta cálida, tipografía serif, modo oscuro).
 - **IA en la nube (opcional, opt-in)**: OpenAI, Anthropic, Gemini, Groq y Mistral. Requiere configurar una API key **y** marcar explícitamente el consentimiento en Ajustes → IA; sin esa casilla, todo se queda en el equipo.
 - **Chat con contexto (RAG)**: indexa las escenas con embeddings y las inyecta como contexto en el chat.
-- **Enriquecimiento completo de fichas**: genera descripción, biografía, rasgos, objetivos y arco (salida JSON estructurada).
+- **Campos personalizados y enriquecimiento con evidencia**: añade campos propios
+  (texto, lista, número) y pide a la IA propuestas con cita textual, confianza y
+  aceptación por campo. Lo escrito a mano nunca se sobrescribe.
 - **Análisis automático en segundo plano** al marcar un capítulo como «Revisado» o «Final».
 - **Buscar y reemplazar** en el editor (`Ctrl/Cmd+F`).
 - **Búsqueda full-text** en toda la novela (`Ctrl/Cmd+Shift+P`) con SQLite FTS5,
   ranking por relevancia y salto directo a la escena.
 - **Grafo de relaciones** en World Building: mapa force-directed de personajes,
   búsqueda, zoom/pan y clic para abrir la ficha.
+- **Campos propios de la biblia** con sugerencias de IA que citan el manuscrito
+  y se aceptan o descartan por campo.
 - **Modo foco** (`Ctrl/Cmd+Shift+F`) para escribir sin distracciones.
 - **Tipografía del editor** configurable: tamaño, interlineado y ancho de columna.
 - **Proyectos recientes** y **apertura de archivos** por asociación o arrastrando

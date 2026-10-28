@@ -17,9 +17,11 @@ pub fn normalize_key(s: &str) -> String {
 }
 
 use crate::error::{AppError, Result};
+use serde_json::Value;
+
 use crate::models::{
-    Chapter, Character, Entity, NavEntry, Project, Relationship, Scene, SceneMeta, SearchHit,
-    SnapshotMeta,
+    BUILTIN_FIELDS, Chapter, Character, CharacterFieldDef, CharacterFieldValue, CharacterFieldView,
+    Entity, NavEntry, Project, Relationship, Scene, SceneMeta, SearchHit, SnapshotMeta,
 };
 use crate::parser::ParsedManuscript;
 
@@ -68,6 +70,7 @@ pub fn create_project(
             project.created_at
         ],
     )?;
+    ensure_builtin_fields(conn, &project.id)?;
     Ok(project)
 }
 
@@ -133,6 +136,8 @@ pub struct ProjectSnapshot {
     pub characters: Vec<Character>,
     pub relationships: Vec<Relationship>,
     pub entities: Vec<Entity>,
+    pub field_defs: Vec<CharacterFieldDef>,
+    pub field_values: Vec<CharacterFieldValue>,
 }
 
 pub fn read_project_snapshot(conn: &Connection, project_id: &str) -> Result<ProjectSnapshot> {
@@ -146,6 +151,8 @@ pub fn read_project_snapshot(conn: &Connection, project_id: &str) -> Result<Proj
     let characters = list_characters(conn, project_id)?;
     let relationships = list_relationships(conn, project_id)?;
     let entities = list_entities(conn, project_id)?;
+    let field_defs = list_field_defs(conn, project_id)?;
+    let field_values = list_field_values(conn, project_id)?;
     Ok(ProjectSnapshot {
         project,
         chapters,
@@ -153,6 +160,8 @@ pub fn read_project_snapshot(conn: &Connection, project_id: &str) -> Result<Proj
         characters,
         relationships,
         entities,
+        field_defs,
+        field_values,
     })
 }
 
@@ -168,6 +177,11 @@ pub fn insert_project_snapshot(
     // Las rutas de assets son relativas al directorio de datos; se conservan
     // tal cual. Si el archivo falta, la UI mostrará la portada vacía.
     let cover = source.cover_path.clone();
+
+    // Los campos personalizados viajan con la copia; los base se recrean con
+    // IDs deterministas para el nuevo proyecto.
+    let field_defs = &snapshot.field_defs;
+    let field_values = &snapshot.field_values;
 
     let tx = conn.transaction()?;
     tx.execute(
@@ -260,6 +274,59 @@ pub fn insert_project_snapshot(
         )?;
     }
 
+    let mut field_ids: HashMap<String, String> = HashMap::new();
+    for def in field_defs {
+        let new_id = if def.builtin {
+            format!("builtin:{}:{}", new_project.id, def.key)
+        } else {
+            uuid::Uuid::new_v4().to_string()
+        };
+        tx.execute(
+            "INSERT INTO character_field_def
+             (id, project_id, key, label, field_type, options_json, prompt_hint, position,
+              builtin, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+            params![
+                new_id,
+                new_project.id,
+                def.key,
+                def.label,
+                def.field_type,
+                json(def.options.clone()),
+                def.prompt_hint.as_deref(),
+                def.position,
+                if def.builtin { 1 } else { 0 },
+                def.created_at
+            ],
+        )?;
+        field_ids.insert(def.id.clone(), new_id);
+    }
+
+    for value in field_values {
+        if let (Some(character_id), Some(field_id)) = (
+            character_ids.get(&value.character_id),
+            field_ids.get(&value.field_id),
+        ) {
+            tx.execute(
+                "INSERT INTO character_field_value
+                 (project_id, character_id, field_id, value_json, source, confidence, evidence,
+                  reason, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    new_project.id,
+                    character_id,
+                    field_id,
+                    value.value_json,
+                    value.source,
+                    value.confidence,
+                    value.evidence,
+                    value.reason,
+                    value.updated_at
+                ],
+            )?;
+        }
+    }
+
     for r in &snapshot.relationships {
         if let (Some(a), Some(b)) = (
             character_ids.get(&r.character_a_id),
@@ -301,6 +368,7 @@ pub fn insert_project_snapshot(
     }
 
     tx.commit()?;
+    ensure_builtin_fields(conn, &new_project.id)?;
     get_project(conn, &new_project.id)?
         .ok_or_else(|| AppError::Internal("no se pudo duplicar el proyecto".into()))
 }
@@ -943,33 +1011,6 @@ pub fn delete_character(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn update_character_profile(
-    conn: &Connection,
-    id: &str,
-    description: Option<&str>,
-    biography: Option<&str>,
-    traits: &[String],
-    goals: &[String],
-    arc: Option<&str>,
-) -> Result<()> {
-    let affected = conn.execute(
-        "UPDATE character SET description = ?1, biography = ?2, traits_json = ?3, goals_json = ?4, arc = ?5, updated_at = ?6 WHERE id = ?7",
-        params![
-            description,
-            biography,
-            json(traits),
-            json(goals),
-            arc,
-            Utc::now().to_rfc3339(),
-            id
-        ],
-    )?;
-    if affected == 0 {
-        return Err(AppError::NotFound(format!("personaje {id}")));
-    }
-    Ok(())
-}
-
 /// Edición manual completa de una ficha de personaje.
 #[allow(clippy::too_many_arguments)]
 pub fn update_character(
@@ -1011,6 +1052,604 @@ pub fn update_character(
     )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("personaje {id}")));
+    }
+    // La edición manual completa reemplaza cualquier sugerencia pendiente de
+    // los campos base: ya no representan el estado de la ficha.
+    conn.execute(
+        "DELETE FROM character_field_value WHERE character_id = ?1
+         AND field_id IN (SELECT id FROM character_field_def WHERE builtin = 1)",
+        params![id],
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Campos de personaje (definiciones y valores)
+// ---------------------------------------------------------------------------
+
+/// Crea las definiciones builtin del proyecto si aún no existen. Los proyectos
+/// nuevos no pasan por la migración, así que se siembran de forma perezosa.
+pub fn ensure_builtin_fields(conn: &Connection, project_id: &str) -> Result<()> {
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM project WHERE id = ?1",
+            params![project_id],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !exists {
+        return Err(AppError::NotFound(format!("proyecto {project_id}")));
+    }
+    let now = Utc::now().to_rfc3339();
+    for (position, (key, label, field_type)) in BUILTIN_FIELDS.iter().enumerate() {
+        let id = format!("builtin:{project_id}:{key}");
+        conn.execute(
+            "INSERT OR IGNORE INTO character_field_def
+             (id, project_id, key, label, field_type, options_json, prompt_hint, position,
+              builtin, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, 1, ?7, ?7)",
+            params![id, project_id, key, label, field_type, position as i64, now],
+        )?;
+    }
+    Ok(())
+}
+
+fn field_def_from_row(row: &Row<'_>) -> rusqlite::Result<CharacterFieldDef> {
+    Ok(CharacterFieldDef {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        key: row.get(2)?,
+        label: row.get(3)?,
+        field_type: row.get(4)?,
+        options: parse_json_list(row.get(5)?),
+        prompt_hint: row.get(6)?,
+        position: row.get(7)?,
+        builtin: row.get::<_, i64>(8)? != 0,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+pub fn list_field_defs(conn: &Connection, project_id: &str) -> Result<Vec<CharacterFieldDef>> {
+    ensure_builtin_fields(conn, project_id)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, key, label, field_type, options_json, prompt_hint, position,
+                builtin, created_at, updated_at
+         FROM character_field_def WHERE project_id = ?1
+         ORDER BY builtin DESC, position ASC, label ASC",
+    )?;
+    let defs = stmt
+        .query_map(params![project_id], field_def_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(defs)
+}
+
+fn validate_field_type(field_type: &str) -> Result<()> {
+    if matches!(field_type, "text" | "longtext" | "list" | "number") {
+        Ok(())
+    } else {
+        Err(AppError::Validation(format!(
+            "tipo de campo no soportado: {field_type}"
+        )))
+    }
+}
+
+/// Crea un campo personalizado. La clave se deriva de la etiqueta y se
+/// desambigua añadiendo un sufijo numérico.
+pub fn create_field_def(
+    conn: &Connection,
+    project_id: &str,
+    label: &str,
+    field_type: &str,
+    prompt_hint: Option<&str>,
+) -> Result<CharacterFieldDef> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::Validation(
+            "la etiqueta del campo no puede estar vacía".into(),
+        ));
+    }
+    validate_field_type(field_type)?;
+    ensure_builtin_fields(conn, project_id)?;
+
+    let base = crate::fields::slugify(label);
+    if BUILTIN_FIELDS.iter().any(|(key, _, _)| *key == base) {
+        return Err(AppError::Validation(format!(
+            "«{label}» ya existe como campo base"
+        )));
+    }
+    let mut key = base.clone();
+    let mut suffix = 2;
+    while conn
+        .query_row(
+            "SELECT 1 FROM character_field_def WHERE project_id = ?1 AND key = ?2",
+            params![project_id, key],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false)
+    {
+        key = format!("{base}_{suffix}");
+        suffix += 1;
+    }
+
+    let next_position: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(position), -1) + 1 FROM character_field_def WHERE project_id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+
+    let now = Utc::now().to_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO character_field_def
+         (id, project_id, key, label, field_type, options_json, prompt_hint, position,
+          builtin, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, 0, ?8, ?8)",
+        params![
+            id,
+            project_id,
+            key,
+            label,
+            field_type,
+            prompt_hint.map(str::trim).filter(|s| !s.is_empty()),
+            next_position,
+            now
+        ],
+    )?;
+    conn.query_row(
+        "SELECT id, project_id, key, label, field_type, options_json, prompt_hint, position,
+                builtin, created_at, updated_at
+         FROM character_field_def WHERE id = ?1",
+        params![id],
+        field_def_from_row,
+    )
+    .map_err(Into::into)
+}
+
+/// Actualiza un campo personalizado. Los campos base no se pueden renombrar ni
+/// cambiar de tipo desde aquí.
+#[allow(clippy::too_many_arguments)]
+pub fn update_field_def(
+    conn: &Connection,
+    id: &str,
+    label: &str,
+    field_type: &str,
+    prompt_hint: Option<&str>,
+    position: Option<i64>,
+) -> Result<CharacterFieldDef> {
+    let current = conn
+        .query_row(
+            "SELECT id, project_id, key, label, field_type, options_json, prompt_hint, position,
+                    builtin, created_at, updated_at
+             FROM character_field_def WHERE id = ?1",
+            params![id],
+            field_def_from_row,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::NotFound(format!("campo {id}")))?;
+    if current.builtin {
+        return Err(AppError::Validation(
+            "los campos base no se pueden modificar".into(),
+        ));
+    }
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::Validation(
+            "la etiqueta del campo no puede estar vacía".into(),
+        ));
+    }
+    validate_field_type(field_type)?;
+
+    if current.field_type != field_type {
+        // Un cambio de tipo invalida los valores previos.
+        conn.execute(
+            "DELETE FROM character_field_value WHERE field_id = ?1",
+            params![id],
+        )?;
+    }
+
+    conn.execute(
+        "UPDATE character_field_def
+         SET label = ?1, field_type = ?2, prompt_hint = ?3,
+             position = COALESCE(?4, position), updated_at = ?5
+         WHERE id = ?6",
+        params![
+            label,
+            field_type,
+            prompt_hint.map(str::trim).filter(|s| !s.is_empty()),
+            position,
+            Utc::now().to_rfc3339(),
+            id
+        ],
+    )?;
+    conn.query_row(
+        "SELECT id, project_id, key, label, field_type, options_json, prompt_hint, position,
+                builtin, created_at, updated_at
+         FROM character_field_def WHERE id = ?1",
+        params![id],
+        field_def_from_row,
+    )
+    .map_err(Into::into)
+}
+
+/// Elimina un campo personalizado y todos sus valores (la FK hace cascada).
+pub fn delete_field_def(conn: &Connection, id: &str) -> Result<()> {
+    let builtin: Option<i64> = conn
+        .query_row(
+            "SELECT builtin FROM character_field_def WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match builtin {
+        None => Err(AppError::NotFound(format!("campo {id}"))),
+        Some(1) => Err(AppError::Validation(
+            "los campos base no se pueden eliminar".into(),
+        )),
+        Some(_) => {
+            conn.execute("DELETE FROM character_field_def WHERE id = ?1", params![id])?;
+            Ok(())
+        }
+    }
+}
+
+/// Reordena los campos personalizados según el orden recibido.
+pub fn reorder_field_defs(conn: &mut Connection, project_id: &str, ids: &[String]) -> Result<()> {
+    let tx = conn.transaction()?;
+    let now = Utc::now().to_rfc3339();
+    for (position, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE character_field_def SET position = ?1, updated_at = ?2
+             WHERE id = ?3 AND project_id = ?4 AND builtin = 0",
+            params![position as i64, now, id, project_id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn field_value_from_row(row: &Row<'_>) -> rusqlite::Result<CharacterFieldValue> {
+    Ok(CharacterFieldValue {
+        project_id: row.get(0)?,
+        character_id: row.get(1)?,
+        field_id: row.get(2)?,
+        value_json: row.get(3)?,
+        source: row.get(4)?,
+        confidence: row.get(5)?,
+        evidence: row.get(6)?,
+        reason: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+pub fn list_field_values(conn: &Connection, project_id: &str) -> Result<Vec<CharacterFieldValue>> {
+    let mut stmt = conn.prepare(
+        "SELECT project_id, character_id, field_id, value_json, source, confidence,
+                evidence, reason, updated_at
+         FROM character_field_value WHERE project_id = ?1",
+    )?;
+    let values = stmt
+        .query_map(params![project_id], field_value_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(values)
+}
+
+fn character_in_project(conn: &Connection, character_id: &str) -> Result<Character> {
+    conn.query_row(
+        "SELECT id, project_id, name, aliases_json, role, description, biography,
+                traits_json, goals_json, arc, color, created_at, updated_at
+         FROM character WHERE id = ?1",
+        params![character_id],
+        character_from_row,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::NotFound(format!("personaje {character_id}")))
+}
+
+fn field_def_by_id(conn: &Connection, id: &str) -> Result<CharacterFieldDef> {
+    conn.query_row(
+        "SELECT id, project_id, key, label, field_type, options_json, prompt_hint, position,
+                builtin, created_at, updated_at
+         FROM character_field_def WHERE id = ?1",
+        params![id],
+        field_def_from_row,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::NotFound(format!("campo {id}")))
+}
+
+fn values_for_character(
+    conn: &Connection,
+    character_id: &str,
+) -> Result<HashMap<String, CharacterFieldValue>> {
+    let mut stmt = conn.prepare(
+        "SELECT project_id, character_id, field_id, value_json, source, confidence,
+                evidence, reason, updated_at
+         FROM character_field_value WHERE character_id = ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![character_id], field_value_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows.into_iter().map(|v| (v.field_id.clone(), v)).collect())
+}
+
+/// Ficha completa: campos base (columnas) + personalizados (EAV), con
+/// procedencia y sugerencias pendientes de la IA.
+pub fn list_character_fields(
+    conn: &Connection,
+    character_id: &str,
+) -> Result<Vec<CharacterFieldView>> {
+    let character = character_in_project(conn, character_id)?;
+    let defs = list_field_defs(conn, &character.project_id)?;
+    let stored = values_for_character(conn, character_id)?;
+
+    let mut views = Vec::with_capacity(defs.len());
+    for def in defs {
+        let stored_value = stored.get(&def.id);
+        let (value, source) = if def.builtin {
+            match crate::fields::builtin_value(&character, &def.key) {
+                Some(v) => (Some(v), "manual".to_string()),
+                None => match stored_value {
+                    Some(v) if v.source == "ai" => (
+                        serde_json::from_str::<Value>(&v.value_json)
+                            .ok()
+                            .filter(|v| !v.is_null()),
+                        "ai".to_string(),
+                    ),
+                    _ => (None, "none".to_string()),
+                },
+            }
+        } else {
+            match stored_value {
+                Some(v) => (
+                    serde_json::from_str::<Value>(&v.value_json)
+                        .ok()
+                        .filter(|v| !v.is_null()),
+                    v.source.clone(),
+                ),
+                None => (None, "none".to_string()),
+            }
+        };
+
+        let ai = stored_value.filter(|v| v.source == "ai");
+        views.push(CharacterFieldView {
+            field_id: def.id,
+            key: def.key,
+            label: def.label,
+            field_type: def.field_type,
+            options: def.options,
+            prompt_hint: def.prompt_hint,
+            builtin: def.builtin,
+            value,
+            source,
+            confidence: ai.and_then(|v| v.confidence),
+            evidence: ai.and_then(|v| v.evidence.clone()),
+            reason: ai.and_then(|v| v.reason.clone()),
+        });
+    }
+    Ok(views)
+}
+
+fn update_builtin_column(
+    conn: &Connection,
+    character_id: &str,
+    key: &str,
+    value: Option<&Value>,
+) -> Result<()> {
+    let (column, is_json) = crate::fields::builtin_column(key)
+        .ok_or_else(|| AppError::Validation(format!("campo base desconocido: {key}")))?;
+    let now = Utc::now().to_rfc3339();
+    if is_json {
+        let items: Vec<String> = value
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        conn.execute(
+            &format!("UPDATE character SET {column} = ?1, updated_at = ?2 WHERE id = ?3"),
+            params![json(items), now, character_id],
+        )?;
+    } else if key == "name" {
+        let name = value
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| AppError::Validation("el nombre no puede estar vacío".into()))?;
+        conn.execute(
+            "UPDATE character SET name = ?1, updated_at = ?2 WHERE id = ?3",
+            params![name, now, character_id],
+        )?;
+    } else {
+        let text = value.and_then(|v| v.as_str());
+        conn.execute(
+            &format!("UPDATE character SET {column} = ?1, updated_at = ?2 WHERE id = ?3"),
+            params![text, now, character_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Escribe un valor manual en un campo (base o personalizado). Un valor `null`
+/// lo borra.
+pub fn set_character_field(
+    conn: &Connection,
+    character_id: &str,
+    field_id: &str,
+    value: &Value,
+) -> Result<()> {
+    let character = character_in_project(conn, character_id)?;
+    let def = field_def_by_id(conn, field_id)?;
+    if def.project_id != character.project_id {
+        return Err(AppError::Validation(
+            "el campo pertenece a otro proyecto".into(),
+        ));
+    }
+    let normalized = crate::fields::normalize_value(&def.field_type, value)?;
+
+    if def.builtin {
+        update_builtin_column(conn, character_id, &def.key, normalized.as_ref())?;
+        // Un valor manual reemplaza cualquier sugerencia pendiente.
+        conn.execute(
+            "DELETE FROM character_field_value WHERE character_id = ?1 AND field_id = ?2",
+            params![character_id, field_id],
+        )?;
+        return Ok(());
+    }
+
+    match normalized {
+        None => {
+            conn.execute(
+                "DELETE FROM character_field_value WHERE character_id = ?1 AND field_id = ?2",
+                params![character_id, field_id],
+            )?;
+        }
+        Some(v) => {
+            conn.execute(
+                "INSERT INTO character_field_value
+                 (project_id, character_id, field_id, value_json, source, confidence, evidence,
+                  reason, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 'manual', NULL, NULL, NULL, ?5)
+                 ON CONFLICT(character_id, field_id) DO UPDATE SET
+                    value_json = excluded.value_json,
+                    source = 'manual',
+                    confidence = NULL,
+                    evidence = NULL,
+                    reason = NULL,
+                    updated_at = excluded.updated_at",
+                params![
+                    character.project_id,
+                    character_id,
+                    field_id,
+                    json(v),
+                    Utc::now().to_rfc3339()
+                ],
+            )?;
+        }
+    }
+    conn.execute(
+        "UPDATE character SET updated_at = ?1 WHERE id = ?2",
+        params![Utc::now().to_rfc3339(), character_id],
+    )?;
+    Ok(())
+}
+
+/// Guarda una propuesta de la IA. Nunca pisa un valor manual: si el campo ya
+/// tiene contenido, se ignora devolviendo `false`.
+pub fn set_field_suggestion(
+    conn: &Connection,
+    character_id: &str,
+    field_id: &str,
+    value: Option<&Value>,
+    confidence: Option<f64>,
+    evidence: Option<&str>,
+    reason: Option<&str>,
+) -> Result<bool> {
+    let character = character_in_project(conn, character_id)?;
+    let def = field_def_by_id(conn, field_id)?;
+    if def.project_id != character.project_id {
+        return Err(AppError::Validation(
+            "el campo pertenece a otro proyecto".into(),
+        ));
+    }
+
+    if def.builtin && crate::fields::builtin_value(&character, &def.key).is_some() {
+        return Ok(false);
+    }
+    let existing = conn
+        .query_row(
+            "SELECT source FROM character_field_value WHERE character_id = ?1 AND field_id = ?2",
+            params![character_id, field_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if existing.as_deref() == Some("manual") {
+        return Ok(false);
+    }
+
+    let normalized = match value {
+        Some(v) => crate::fields::normalize_value(&def.field_type, v)?,
+        None => None,
+    };
+    let confidence = confidence.map(|c| c.clamp(0.0, 1.0));
+    let reason = if normalized.is_none() {
+        Some(reason.unwrap_or("sin evidencia suficiente"))
+    } else {
+        reason
+    };
+    conn.execute(
+        "INSERT INTO character_field_value
+         (project_id, character_id, field_id, value_json, source, confidence, evidence,
+          reason, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'ai', ?5, ?6, ?7, ?8)
+         ON CONFLICT(character_id, field_id) DO UPDATE SET
+            value_json = excluded.value_json,
+            source = 'ai',
+            confidence = excluded.confidence,
+            evidence = excluded.evidence,
+            reason = excluded.reason,
+            updated_at = excluded.updated_at",
+        params![
+            character.project_id,
+            character_id,
+            field_id,
+            json(normalized),
+            confidence,
+            evidence,
+            reason,
+            Utc::now().to_rfc3339()
+        ],
+    )?;
+    Ok(true)
+}
+
+/// Acepta una sugerencia pendiente: la convierte en valor del autor.
+pub fn accept_field_suggestion(
+    conn: &Connection,
+    character_id: &str,
+    field_id: &str,
+) -> Result<()> {
+    let suggestion = conn
+        .query_row(
+            "SELECT value_json, source FROM character_field_value
+             WHERE character_id = ?1 AND field_id = ?2",
+            params![character_id, field_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::NotFound("sugerencia".into()))?;
+    if suggestion.1 != "ai" {
+        return Err(AppError::Validation(
+            "solo se pueden aceptar sugerencias de la IA".into(),
+        ));
+    }
+    let value: Value = serde_json::from_str(&suggestion.0)
+        .map_err(|e| AppError::Internal(format!("valor sugerido inválido: {e}")))?;
+    if value.is_null() {
+        return Err(AppError::Validation(
+            "la sugerencia no tiene valor que aceptar".into(),
+        ));
+    }
+    set_character_field(conn, character_id, field_id, &value)
+}
+
+/// Descarta una sugerencia pendiente sin tocar el valor del autor.
+pub fn reject_field_suggestion(
+    conn: &Connection,
+    character_id: &str,
+    field_id: &str,
+) -> Result<()> {
+    let affected = conn.execute(
+        "DELETE FROM character_field_value
+         WHERE character_id = ?1 AND field_id = ?2 AND source = 'ai'",
+        params![character_id, field_id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound("sugerencia".into()));
     }
     Ok(())
 }
@@ -1944,5 +2583,165 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn custom_fields_merge_with_builtins_and_respect_manual_values() {
+        let conn = crate::db::test_connection();
+        let project = create_project(&conn, "Campos", None, 5000, None, None).unwrap();
+        let character = Character::new(&project.id, "Elena");
+        conn.execute(
+            "INSERT INTO character (id, project_id, name, aliases_json, traits_json,
+             goals_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '[]', '[]', '[]', ?4, ?4)",
+            params![
+                character.id,
+                character.project_id,
+                character.name,
+                character.created_at
+            ],
+        )
+        .unwrap();
+
+        let defs = list_field_defs(&conn, &project.id).unwrap();
+        assert!(defs.iter().filter(|d| d.builtin).count() >= 9);
+        assert!(defs.iter().any(|d| d.key == "description" && d.builtin));
+
+        let def = create_field_def(
+            &conn,
+            &project.id,
+            "Color de ojos",
+            "text",
+            Some("Solo si se cita"),
+        )
+        .unwrap();
+        assert_eq!(def.key, "color_de_ojos");
+        assert!(!def.builtin);
+
+        // Valor manual del autor.
+        set_character_field(&conn, &character.id, &def.id, &serde_json::json!("verdes")).unwrap();
+        let fields = list_character_fields(&conn, &character.id).unwrap();
+        let eyes = fields.iter().find(|f| f.field_id == def.id).unwrap();
+        assert_eq!(eyes.value, Some(serde_json::json!("verdes")));
+        assert_eq!(eyes.source, "manual");
+
+        // Una sugerencia de la IA no puede pisar el valor manual.
+        let stored = set_field_suggestion(
+            &conn,
+            &character.id,
+            &def.id,
+            Some(&serde_json::json!("azules")),
+            Some(0.9),
+            Some("ojos azules"),
+            None,
+        )
+        .unwrap();
+        assert!(!stored);
+
+        // Un campo vacío sí acepta sugerencia y luego se acepta.
+        let empty_def = create_field_def(&conn, &project.id, "Edad", "number", None).unwrap();
+        assert!(
+            set_field_suggestion(
+                &conn,
+                &character.id,
+                &empty_def.id,
+                Some(&serde_json::json!(27)),
+                Some(0.8),
+                Some("tenía veintisiete años"),
+                None,
+            )
+            .unwrap()
+        );
+        accept_field_suggestion(&conn, &character.id, &empty_def.id).unwrap();
+        let fields = list_character_fields(&conn, &character.id).unwrap();
+        let age = fields.iter().find(|f| f.field_id == empty_def.id).unwrap();
+        assert_eq!(age.value, Some(serde_json::json!(27)));
+        assert_eq!(age.source, "manual");
+    }
+
+    #[test]
+    fn builtin_field_acceptance_writes_the_character_column() {
+        let conn = crate::db::test_connection();
+        let project = create_project(&conn, "Builtin", None, 5000, None, None).unwrap();
+        let character = Character::new(&project.id, "Marco");
+        conn.execute(
+            "INSERT INTO character (id, project_id, name, aliases_json, traits_json,
+             goals_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '[]', '[]', '[]', ?4, ?4)",
+            params![
+                character.id,
+                character.project_id,
+                character.name,
+                character.created_at
+            ],
+        )
+        .unwrap();
+        let description = list_field_defs(&conn, &project.id)
+            .unwrap()
+            .into_iter()
+            .find(|d| d.key == "description")
+            .unwrap();
+        assert!(
+            set_field_suggestion(
+                &conn,
+                &character.id,
+                &description.id,
+                Some(&serde_json::json!("Un marinero curtido.")),
+                Some(0.7),
+                Some("marinero curtido"),
+                None,
+            )
+            .unwrap()
+        );
+        let fields = list_character_fields(&conn, &character.id).unwrap();
+        let view = fields.iter().find(|f| f.key == "description").unwrap();
+        assert_eq!(view.source, "ai");
+        assert!(view.value.is_some());
+
+        accept_field_suggestion(&conn, &character.id, &description.id).unwrap();
+        let updated = list_characters(&conn, &project.id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == character.id)
+            .unwrap();
+        assert_eq!(updated.description.as_deref(), Some("Un marinero curtido."));
+        let fields = list_character_fields(&conn, &character.id).unwrap();
+        let view = fields.iter().find(|f| f.key == "description").unwrap();
+        assert_eq!(view.source, "manual");
+    }
+
+    #[test]
+    fn duplicate_project_copies_custom_fields() {
+        let mut conn = crate::db::test_connection();
+        let project = create_project(&conn, "Con campos", None, 5000, None, None).unwrap();
+        let character = Character::new(&project.id, "Lía");
+        conn.execute(
+            "INSERT INTO character (id, project_id, name, aliases_json, traits_json,
+             goals_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '[]', '[]', '[]', ?4, ?4)",
+            params![
+                character.id,
+                character.project_id,
+                character.name,
+                character.created_at
+            ],
+        )
+        .unwrap();
+        let def = create_field_def(&conn, &project.id, "Herida", "text", None).unwrap();
+        set_character_field(
+            &conn,
+            &character.id,
+            &def.id,
+            &serde_json::json!("en el brazo"),
+        )
+        .unwrap();
+
+        let copy = duplicate_project(&mut conn, &project.id).unwrap();
+        let copied_character = list_characters(&conn, &copy.id).unwrap()[0].clone();
+        let copied_defs = list_field_defs(&conn, &copy.id).unwrap();
+        assert!(copied_defs.iter().any(|d| d.key == "herida"));
+        let fields = list_character_fields(&conn, &copied_character.id).unwrap();
+        let wound = fields.iter().find(|f| f.key == "herida").unwrap();
+        assert_eq!(wound.value, Some(serde_json::json!("en el brazo")));
     }
 }

@@ -76,11 +76,17 @@ Abre **Mundo** en la barra superior.
 
 1. Pulsa **Analizar** para detectar personajes, relaciones, lugares y facciones.
 2. Revisa las fichas. Puedes **editar** cualquier personaje o entidad.
-3. Pulsa **Enriquecer** (requiere Ollama o IA en la nube) para generar
-   descripción, biografía, rasgos, objetivos y arco.
-4. Abre la pestaña **Grafo** para ver el mapa de relaciones: arrastra nodos,
+3. Pulsa **Sugerencias IA** (requiere Ollama o IA en la nube). En lugar de
+   sobrescribir la ficha, se generan propuestas con una **cita textual** y una
+   **confianza**; acéptalas o descártalas una a una en la ficha del personaje.
+   Si el texto no basta, el campo queda como «sin evidencia suficiente» y no se
+   inventa nada. Lo que escribiste a mano nunca se pisa.
+4. Abre la pestaña **Campos** para añadir campos propios («Color de ojos»,
+   «Herida», «Objeto simbólico»…) con su tipo y, opcionalmente, un indicio para
+   la IA. Estos campos también reciben sugerencias con evidencia.
+5. Abre la pestaña **Grafo** para ver el mapa de relaciones: arrastra nodos,
    haz zoom/pan, busca un personaje y haz clic para abrir su ficha.
-5. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
+6. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
 
 El análisis es **no destructivo**: analizar un capítulo no borra los personajes
 de los anteriores. Las fichas que edites a mano se conservan.

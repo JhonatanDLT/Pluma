@@ -252,8 +252,18 @@ Presets de modelos locales que se aplican con un clic según el hardware del aut
 - **Integración**: el comando `chat` inyecta el contexto recuperado en el prompt (`chat_with_context`).
 - **Optimizaciones**: el embedder se reutiliza en el análisis y se cachea en el chat (`keep_loaded`); existe `index_project` para indexar sin analizar.
 
-### Enriquecimiento completo de fichas
+### Enriquecimiento de fichas con evidencia
 
-- `describe_character` devuelve un **perfil estructurado** (`CharacterProfile`: description, biography, traits, goals, arc) en JSON.
-- `enrich_project` persiste todos los campos vía `repo::update_character_profile`.
+- `suggest_character_fields` pide al modelo un objeto JSON por campo:
+  `{ value, confidence, evidence, reason }`, para los campos base enriquecibles
+  (descripción, biografía, rasgos, objetivos y arco) y los campos personalizados.
+- Cada `evidence` se valida contra el contexto normalizado (sin tildes, en
+  minúsculas y con espacios simples). Si la cita no aparece en el texto, la
+  propuesta se guarda sin valor y con el motivo «sin evidencia suficiente»: el
+  modelo no puede inventar.
+- `enrich_project` y `enrich_character_fields` **no escriben la ficha**: guardan
+  sugerencias `source = ai` en `character_field_value`. El autor las acepta o
+  descarta por campo; al aceptarlas pasan a `manual`.
+- Un valor manual (`source = manual`) nunca se sobrescribe con una sugerencia.
+- Cada personaje se procesa por separado; un JSON inválido no aborta el lote.
 - El tipado de relaciones usa la categoría `ninguna` y normalización de salida (`normalize_type`).

@@ -1658,4 +1658,32 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn docx_round_trip_preserves_text() {
+        let (meta, content) = sample_content();
+        let dir = std::env::temp_dir().join(format!("pluma-docx-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prueba.docx");
+
+        export(&meta, &content, ExportFormat::Docx, &path).unwrap();
+        let text = crate::extract::extract_markdown(&path).unwrap();
+        assert!(text.contains("Elena caminó hasta el faro."));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pdf_round_trip_preserves_text() {
+        let (meta, content) = sample_content();
+        let dir = std::env::temp_dir().join(format!("pluma-pdf-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prueba.pdf");
+
+        export(&meta, &content, ExportFormat::Pdf, &path).unwrap();
+        let text = crate::extract::extract_markdown(&path).unwrap();
+        assert!(text.contains("faro"), "texto extraído: {text:?}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

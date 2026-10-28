@@ -19,7 +19,7 @@ criterio de aceptación.
 
 | ID | Deuda | Impacto | Prioridad | Esfuerzo | Aceptación |
 | --- | --- | --- | --- | --- | --- |
-| TD-01 | `import_file`, `export_project`, `persist_image` aceptan rutas crudas del renderer. | Un renderer comprometido puede leer/escribir archivos permitidos por extensión. | P1 | 2d | Diálogos nativos en Rust, rutas canónicas, rechazo de symlinks fuera de raíces permitidas y límites de tamaño. |
+| TD-01 | `import_file`, `export_project`, `persist_image` aceptan rutas crudas del renderer. | Un renderer comprometido puede leer/escribir archivos permitidos por extensión. | P1 | 2d | ✅ Diálogos nativos en Rust para importar/exportar/imágenes/portada; quedan pendientes la canonicalización/rechazo de symlinks y un token para portadas. |
 | TD-02 | La CSP permite `'unsafe-inline'` en scripts. | Reduce la defensa contra XSS. | P2 | 1d | Nonces/hashes para el script de tema y `script-src 'self'` estricto. |
 | TD-03 | La sanitización de Markdown es solo cliente. | Exportaciones/importaciones desde archivos no confiables. | P1 | 1d | Sanitizador Rust compartido por import/export/preview. |
 | TD-04 | Sin logging estructurado ni crash reporting. | Diagnóstico difícil en equipos de usuarios. | P1 | 1d | `tauri-plugin-log` rotativo con redacción de rutas/claves; crash report opt-in. |
@@ -87,7 +87,7 @@ criterio de aceptación.
 | TD-41 | Corrección IA remonta el editor y pierde cursor. | Mala experiencia en sesiones largas. | P1 | 2d | Transacciones TipTap y diff aceptar/rechazar. |
 | TD-42 | Reemplazo ortográfico con regex global. | Cambia todas las ocurrencias. | P1 | 0,5d | Reemplazo de una sola ocurrencia por defecto. |
 | TD-43 | Panel de ortografía sin «ignorar/añadir al diccionario». | Nombres propios marcados siempre. | P1 | 1d | Ignorar una vez, siempre y añadir al diccionario. |
-| TD-44 | TTS sin pausa/reanudación ni Piper. | Lectura menos flexible. | P2 | 3d | Pausa/reanudación y voces neuronales opcionales. |
+| TD-44 | TTS sin pausa/reanudación ni Piper. | Lectura menos flexible. | P2 | 3d | ✅ Pausa/reanudación (macOS/Linux) y velocidad; pendiente Piper. |
 
 ## 7. Calidad y CI
 
@@ -98,14 +98,14 @@ criterio de aceptación.
 | TD-47 | Sin tests E2E. | Regresiones de UI no detectadas. | P2 | 5d | Playwright/Webdriver con flujos críticos. |
 | TD-48 | Sin verificación de artefactos de release. | Instaladores rotos pasan. | P1 | 1d | Smoke test en VM limpia + `spctl`/firma. |
 | TD-49 | Sin Dependabot. | Dependencias desactualizadas. | P2 | 0,5d | `.github/dependabot.yml` para npm y cargo. |
-| TD-50 | Sin tests de exportación round-trip. | EPUB/DOCX/PDF pueden degradarse. | P1 | 2d | Golden files y round-trip EPUB. |
+| TD-50 | Sin tests de exportación round-trip. | EPUB/DOCX/PDF pueden degradarse. | P1 | 2d | ✅ Round-trip EPUB, DOCX y PDF con contenido real. |
 
 ## 8. Documentación
 
 | ID | Deuda | Impacto | Prioridad | Esfuerzo | Aceptación |
 | --- | --- | --- | --- | --- | --- |
-| TD-51 | Docs mezclan «as-built» con intención. | Expectativas incorrectas. | P1 | 1d | Pasada de verdad: marcar implementado/pendiente. |
-| TD-52 | Sin guía de usuario. | Curva de entrada. | P1 | 2d | Manual breve: proyectos, escenas, biblia, exportar, backups. |
+| TD-51 | Docs mezclan «as-built» con intención. | Expectativas incorrectas. | P1 | 1d | ✅ Nota de estado en el plan maestro y docs 01/04 actualizados; el estado vivo está en README/CHANGELOG/deuda técnica. |
+| TD-52 | Sin guía de usuario. | Curva de entrada. | P1 | 2d | ✅ `docs/13-guia-de-usuario.md`. |
 | TD-53 | Sin doc del sistema de diseño. | Inconsistencia visual futura. | P2 | 1d | `docs/13-diseno-ui.md` con tokens y componentes. |
 | TD-54 | Sin política de terceros generada automáticamente. | Riesgo legal. | P2 | 1d | `cargo about` + `pnpm licenses` en CI. |
 

@@ -83,6 +83,10 @@ export const importMarkdown = (projectId: string, markdown: string) =>
   invoke<Chapter[]>("import_markdown", { projectId, markdown });
 export const importFile = (projectId: string, path: string) =>
   invoke<Chapter[]>("import_file", { projectId, path });
+export const importFileDialog = (projectId: string) =>
+  invoke<Chapter[] | null>("import_file_dialog", { projectId });
+export const pickImportFile = () => invoke<string | null>("pick_import_file");
+export const pickCoverImage = () => invoke<string | null>("pick_cover_image");
 export const importFileAsProject = (
   path: string,
   author: string | null,
@@ -134,6 +138,8 @@ export const exportProject = (
   format: string,
   path: string,
 ) => invoke<void>("export_project", { projectId, format, path });
+export const exportProjectDialog = (projectId: string, format: string) =>
+  invoke<string | null>("export_project_dialog", { projectId, format });
 
 // Personajes y relaciones (IA)
 export const listCharacters = (projectId: string) =>
@@ -227,6 +233,10 @@ export const iaProfiles = () => invoke<ProfileInfo[]>("ia_profiles");
 export const iaApplyProfile = (profile: string) =>
   invoke<IaSettings>("ia_apply_profile", { profile });
 
+// Imágenes del editor
+export const persistImageDialog = () =>
+  invoke<string | null>("persist_image_dialog");
+
 // Copias de seguridad
 export const backupDatabase = () => invoke<string>("backup_database");
 export const listBackups = () => invoke<BackupInfo[]>("list_backups");
@@ -242,5 +252,7 @@ export const takeOpenedFiles = () => invoke<string[]>("take_opened_files");
 export const ttsSpeak = (text: string, voice: string | null, rate: number) =>
   invoke<void>("tts_speak", { text, voice, rate });
 export const ttsStop = () => invoke<void>("tts_stop");
+export const ttsPause = () => invoke<void>("tts_pause");
+export const ttsResume = () => invoke<void>("tts_resume");
 export const ttsListVoices = () =>
   invoke<{ name: string; locale: string }[]>("tts_list_voices");

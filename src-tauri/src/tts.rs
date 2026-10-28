@@ -65,6 +65,53 @@ pub fn list_voices() -> Result<Vec<VoiceInfo>> {
     list_voices_platform()
 }
 
+#[cfg(unix)]
+fn current_pid() -> Result<u32> {
+    let guard = CURRENT
+        .lock()
+        .map_err(|_| AppError::Internal("estado de TTS corrupto".into()))?;
+    guard
+        .as_ref()
+        .map(|child| child.id())
+        .ok_or_else(|| AppError::Validation("no hay reproducción activa".into()))
+}
+
+/// Pausa la reproducción actual (Unix: SIGSTOP sobre el proceso de voz).
+#[cfg(unix)]
+pub fn pause() -> Result<()> {
+    let pid = current_pid()?;
+    std::process::Command::new("kill")
+        .args(["-STOP", &pid.to_string()])
+        .status()
+        .map_err(|e| AppError::Internal(format!("no se pudo pausar el TTS: {e}")))?;
+    Ok(())
+}
+
+/// Reanuda la reproducción pausada (Unix: SIGCONT).
+#[cfg(unix)]
+pub fn resume() -> Result<()> {
+    let pid = current_pid()?;
+    std::process::Command::new("kill")
+        .args(["-CONT", &pid.to_string()])
+        .status()
+        .map_err(|e| AppError::Internal(format!("no se pudo reanudar el TTS: {e}")))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn pause() -> Result<()> {
+    Err(AppError::Validation(
+        "pausar el TTS no está soportado en esta plataforma".into(),
+    ))
+}
+
+#[cfg(not(unix))]
+pub fn resume() -> Result<()> {
+    Err(AppError::Validation(
+        "reanudar el TTS no está soportado en esta plataforma".into(),
+    ))
+}
+
 #[cfg(target_os = "macos")]
 fn spawn_platform(text: &str, voice: Option<&str>, rate: f32) -> Result<Child> {
     let mut cmd = Command::new("say");

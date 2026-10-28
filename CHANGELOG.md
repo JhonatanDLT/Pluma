@@ -48,6 +48,16 @@ semántico.
   (requiere configurar el endpoint real).
 - **Verificación de artefactos de release:** instaladores, firma `.sig`,
   Gatekeeper y notarización en macOS.
+- **Diálogos nativos en Rust** para importar manuscritos, proyectos, portadas,
+  imágenes y elegir el destino de exportación. El renderer ya no abre diálogos
+  ni elige rutas arbitrarias para estas operaciones.
+- **Tests round-trip DOCX y PDF**, además de EPUB, para detectar regresiones de
+  exportación.
+- **TTS:** pausa/reanudación en macOS/Linux y control de velocidad en la UI.
+- **Nivel único:** el panel de escenas se oculta automáticamente cuando el
+  proyecto no usa subdivisiones, como describe la documentación.
+- **Guía de usuario** (`docs/13-guia-de-usuario.md`) y pasada de verdad sobre
+  los docs de producto.
 
 ### Corregido
 

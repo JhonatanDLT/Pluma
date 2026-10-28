@@ -85,7 +85,7 @@ visualiza de forma automática, con ayuda de **IA local y ligera**.
 | ID | Prioridad | Descripción |
 |----|-----------|-------------|
 | FR-30 | M | Reproducir el texto seleccionado o el capítulo actual con **voz del sistema operativo**. |
-| FR-31 | M | Controles básicos: reproducir, pausar, detener, velocidad y selección de voz. |
+| FR-31 | M | Controles básicos: reproducir, pausar, detener, velocidad y selección de voz. *(Pausa/reanudación en macOS/Linux; en Windows se usa detener).* |
 | FR-32 | S | Resaltado de la frase en reproducción (sincronización básica por oración). |
 | FR-33 | W | TTS neuronal local (Piper) con voces de alta calidad (fase futura, ver `04-tts.md`). |
 | FR-34 | W | Clonación / voces por personaje con IA. |

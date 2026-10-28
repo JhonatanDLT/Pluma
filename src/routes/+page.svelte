@@ -18,7 +18,6 @@
     registerCustomFonts,
   } from "$lib/fonts";
   import { applyEditorSettings, getEditorSettings } from "$lib/editor";
-  import { open, save } from "@tauri-apps/plugin-dialog";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -740,32 +739,9 @@
     if (!selectedProjectId) return;
     await flushSave();
     try {
-      const selected = await open({
-        multiple: false,
-        directory: false,
-        title: "Importar documento",
-        filters: [
-          {
-            name: "Todos los formatos",
-            extensions: [
-              "md", "markdown", "txt", "pdf", "docx", "epub",
-              "png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp",
-            ],
-          },
-          { name: "Markdown / Texto", extensions: ["md", "markdown", "txt"] },
-          { name: "PDF", extensions: ["pdf"] },
-          { name: "Word", extensions: ["docx"] },
-          { name: "EPUB", extensions: ["epub"] },
-          {
-            name: "Imágenes (OCR)",
-            extensions: ["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp"],
-          },
-        ],
-      });
-      if (typeof selected !== "string") return;
-
       importing = true;
-      await api.importFile(selectedProjectId, selected);
+      const imported = await api.importFileDialog(selectedProjectId);
+      if (!imported || imported.length === 0) return;
 
       selectedChapterId = null;
       selectedSceneId = null;
@@ -916,18 +892,12 @@
   // Exportación
   // -------------------------------------------------------------------------
 
-  async function exportDocument(format: string, ext: string) {
+  async function exportDocument(format: string, _ext: string) {
     if (!selectedProjectId) return;
     exportOpen = false;
     try {
-      const defaultPath = `${selectedProject?.title ?? "manuscrito"}.${ext}`;
-      const path = await save({
-        title: "Exportar manuscrito",
-        defaultPath,
-        filters: [{ name: format.toUpperCase(), extensions: [ext] }],
-      });
-      if (!path) return;
-      await api.exportProject(selectedProjectId, format, path);
+      const path = await api.exportProjectDialog(selectedProjectId, format);
+      if (path) logChange(`Exportado: ${path}`);
     } catch (e) {
       reportError(e);
     }
@@ -1232,6 +1202,8 @@
 
   let ttsVoices = $state<{ name: string; locale: string }[]>([]);
   let ttsVoice = $state<string>("");
+  let ttsPaused = $state(false);
+  let ttsRate = $state("1.0");
 
   async function loadTtsVoices() {
     try {
@@ -1246,7 +1218,22 @@
   async function playTts() {
     if (!selectedSceneId) return;
     try {
-      await api.ttsSpeak(sceneContent, ttsVoice || null, 1.0);
+      ttsPaused = false;
+      await api.ttsSpeak(sceneContent, ttsVoice || null, Number(ttsRate));
+    } catch (e) {
+      reportError(e);
+    }
+  }
+
+  async function pauseTts() {
+    try {
+      if (ttsPaused) {
+        await api.ttsResume();
+        ttsPaused = false;
+      } else {
+        await api.ttsPause();
+        ttsPaused = true;
+      }
     } catch (e) {
       reportError(e);
     }
@@ -1254,6 +1241,7 @@
 
   async function stopTts() {
     try {
+      ttsPaused = false;
       await api.ttsStop();
     } catch (e) {
       reportError(e);
@@ -1555,7 +1543,7 @@
         <button class="collapsed-tab" onclick={() => (chaptersCollapsed = false)}>{selectedProject?.level1_name ?? "Capítulos"}</button>
       {/if}
 
-      {#if !focusMode && viewMode === "split"}
+      {#if !focusMode && viewMode === "split" && projectUsesScenes}
         {#if !scenesCollapsed}
           <aside class="panel" style:width="{scenesWidth}px">
             <ScenesPanel
@@ -1601,7 +1589,18 @@
             </select>
           {/if}
           <button class="btn-icon" title="Reproducir" onclick={playTts}>▶</button>
+          <button
+            class="btn-icon"
+            title={ttsPaused ? "Reanudar" : "Pausar"}
+            onclick={pauseTts}
+          >{ttsPaused ? "⏵" : "⏸"}</button>
           <button class="btn-icon" title="Detener" onclick={stopTts}>■</button>
+          <select class="tts-voice tts-rate" bind:value={ttsRate} title="Velocidad de lectura">
+            <option value="0.75">0.75×</option>
+            <option value="1.0">1×</option>
+            <option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option>
+          </select>
           <button
             class="btn"
             title="Corrige gramática y ortografía con un LLM local (Ollama)"
@@ -1999,6 +1998,10 @@
   .workspace.focus .topbar {
     background: var(--bg);
     border-bottom-color: transparent;
+  }
+
+  .tts-rate {
+    max-width: 72px;
   }
 
   .tts-voice {

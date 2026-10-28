@@ -1,6 +1,5 @@
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
-  import { open } from "@tauri-apps/plugin-dialog";
   import * as api from "$lib/api";
   import { trapFocus } from "$lib/focusTrap";
   import type { Project } from "$lib/types";
@@ -82,13 +81,8 @@
   }
 
   async function openImport() {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      title: "Importar proyecto (PDF, EPUB, DOCX, TXT…)",
-      filters: [{ name: "Documentos", extensions: ["pdf", "epub", "docx", "md", "markdown", "txt"] }],
-    });
-    if (typeof selected !== "string") return;
+    const selected = await api.pickImportFile();
+    if (!selected) return;
     const name = selected.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") ?? "Documento";
     formMode = "import";
     importPath = selected;
@@ -101,13 +95,8 @@
   }
 
   async function pickCover() {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      title: "Portada del proyecto",
-      filters: [{ name: "Imágenes", extensions: ["png", "jpg", "jpeg", "webp"] }],
-    });
-    if (typeof selected === "string") formCover = selected;
+    const selected = await api.pickCoverImage();
+    if (selected) formCover = selected;
   }
 
   function submit() {

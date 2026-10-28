@@ -4,6 +4,7 @@ use std::sync::MutexGuard;
 
 use rusqlite::Connection;
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::backup;
 use crate::db::Db;
@@ -122,6 +123,67 @@ fn validate_export_path(path: &std::path::Path, format: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Abre un diálogo nativo de selección de archivo **desde Rust**. Así el
+/// renderer no elige rutas arbitrarias: solo recibe el resultado ya validado.
+fn pick_file(
+    app: &tauri::AppHandle,
+    title: &str,
+    filters: &[(&str, &[&str])],
+) -> Result<Option<PathBuf>> {
+    let mut dialog = app.dialog().file().set_title(title);
+    for (name, extensions) in filters {
+        dialog = dialog.add_filter(*name, extensions);
+    }
+    dialog
+        .blocking_pick_file()
+        .map(|file| {
+            file.into_path()
+                .map_err(|e| AppError::Validation(format!("ruta inválida: {e}")))
+        })
+        .transpose()
+}
+
+/// Abre un diálogo nativo de guardado desde Rust.
+fn pick_save_file(
+    app: &tauri::AppHandle,
+    title: &str,
+    default_name: &str,
+    filter_name: &str,
+    extension: &str,
+) -> Result<Option<PathBuf>> {
+    app.dialog()
+        .file()
+        .set_title(title)
+        .set_file_name(default_name)
+        .add_filter(filter_name, &[extension])
+        .blocking_save_file()
+        .map(|file| {
+            file.into_path()
+                .map_err(|e| AppError::Validation(format!("ruta inválida: {e}")))
+        })
+        .transpose()
+}
+
+/// Nombre de archivo seguro a partir del título del proyecto.
+fn safe_file_name(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "manuscrito".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Huella SHA-256 de un conjunto de textos (para detectar cambios sin comparar
@@ -329,6 +391,69 @@ pub fn import_markdown(
     let manuscript = parser::parse(&markdown);
     let mut guard = lock(&db)?;
     repo::import_manuscript(&mut guard, &project_id, &manuscript)
+}
+
+/// Importa un manuscrito eligiendo el archivo con un diálogo nativo en Rust.
+#[tauri::command(async)]
+pub fn import_file_dialog(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    project_id: String,
+) -> Result<Option<Vec<Chapter>>> {
+    const ALL: &[&str] = &[
+        "md", "markdown", "txt", "pdf", "docx", "epub", "png", "jpg", "jpeg", "tif", "tiff",
+        "webp", "bmp",
+    ];
+    const TEXT: &[&str] = &["md", "markdown", "txt"];
+    const PDF: &[&str] = &["pdf"];
+    const WORD: &[&str] = &["docx"];
+    const EPUB: &[&str] = &["epub"];
+    const IMAGES: &[&str] = &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp"];
+    let filters: &[(&str, &[&str])] = &[
+        ("Todos los formatos", ALL),
+        ("Markdown / Texto", TEXT),
+        ("PDF", PDF),
+        ("Word", WORD),
+        ("EPUB", EPUB),
+        ("Imágenes (OCR)", IMAGES),
+    ];
+
+    let Some(path) = pick_file(&app, "Importar documento", filters)? else {
+        return Ok(None);
+    };
+    validate_import_path(&path)?;
+    let markdown = extract::extract_markdown(&path)?;
+    let manuscript = parser::parse(&markdown);
+    let mut guard = lock(&db)?;
+    let chapters = repo::import_manuscript(&mut guard, &project_id, &manuscript)?;
+    Ok(Some(chapters))
+}
+
+/// Devuelve la ruta elegida para importar un proyecto completo.
+#[tauri::command]
+pub fn pick_import_file(app: tauri::AppHandle) -> Result<Option<String>> {
+    const DOCS: &[&str] = &["pdf", "epub", "docx", "md", "markdown", "txt"];
+    let Some(path) = pick_file(
+        &app,
+        "Importar proyecto (PDF, EPUB, DOCX, TXT…)",
+        &[("Documentos", DOCS)],
+    )?
+    else {
+        return Ok(None);
+    };
+    validate_import_path(&path)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Devuelve la ruta elegida para la portada de un proyecto.
+#[tauri::command]
+pub fn pick_cover_image(app: tauri::AppHandle) -> Result<Option<String>> {
+    const IMAGES: &[&str] = &["png", "jpg", "jpeg", "webp"];
+    let Some(path) = pick_file(&app, "Portada del proyecto", &[("Imágenes", IMAGES)])? else {
+        return Ok(None);
+    };
+    validate_image_path(&path)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 /// Lee un archivo (`.md`, `.txt`, `.pdf` o imagen) y lo importa al proyecto,
@@ -567,6 +692,54 @@ pub fn export_project(
         cover_path: project.cover_path,
     };
     export::export(&meta, &content, format, std::path::Path::new(&path))
+}
+
+/// Exporta el proyecto eligiendo el destino con un diálogo nativo en Rust.
+#[tauri::command(async)]
+pub fn export_project_dialog(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    project_id: String,
+    format: String,
+) -> Result<Option<String>> {
+    let export_format = export::ExportFormat::from_str(&format)?;
+    let (label, ext) = match format.as_str() {
+        "md" => ("Markdown", "md"),
+        "txt" => ("Texto", "txt"),
+        "html" => ("HTML", "html"),
+        "docx" => ("Word", "docx"),
+        "pdf" => ("PDF", "pdf"),
+        "epub" => ("EPUB", "epub"),
+        _ => {
+            return Err(AppError::Validation(format!(
+                "formato desconocido: {format}"
+            )));
+        }
+    };
+
+    // Lee los datos con el lock y suéltalo antes de abrir el diálogo/exportar.
+    let (project, content) = {
+        let conn = lock(&db)?;
+        let project = repo::get_project(&conn, &project_id)?
+            .ok_or_else(|| AppError::NotFound(format!("proyecto {project_id}")))?;
+        let content = repo::get_project_content(&conn, &project_id)?;
+        (project, content)
+    };
+
+    let default_name = format!("{}.{}", safe_file_name(&project.title), ext);
+    let Some(path) = pick_save_file(&app, "Exportar manuscrito", &default_name, label, ext)? else {
+        return Ok(None);
+    };
+    validate_export_path(&path, &format)?;
+
+    let meta = export::ExportMeta {
+        title: project.title,
+        author: project.author,
+        description: project.description,
+        cover_path: project.cover_path,
+    };
+    export::export(&meta, &content, export_format, &path)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 // ---------------------------------------------------------------------------
@@ -1181,10 +1354,26 @@ fn persist_cover(app: &tauri::AppHandle, source: Option<&str>) -> Result<Option<
 /// devuelve la ruta persistida (para referenciarla en Markdown como `![](ruta)`).
 #[tauri::command]
 pub fn persist_image(app: tauri::AppHandle, source: String) -> Result<String> {
-    let source = std::path::Path::new(&source);
-    validate_image_path(source)?;
+    validate_image_path(std::path::Path::new(&source))?;
+    persist_image_impl(&app, &source)
+}
+
+/// Elige una imagen con un diálogo nativo y la persiste en el directorio de datos.
+#[tauri::command(async)]
+pub fn persist_image_dialog(app: tauri::AppHandle) -> Result<Option<String>> {
+    const IMAGES: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff"];
+    let Some(path) = pick_file(&app, "Insertar imagen", &[("Imágenes", IMAGES)])? else {
+        return Ok(None);
+    };
+    validate_image_path(&path)?;
+    let source = path.to_string_lossy().into_owned();
+    Ok(Some(persist_image_impl(&app, &source)?))
+}
+
+fn persist_image_impl(app: &tauri::AppHandle, source: &str) -> Result<String> {
+    let source = std::path::Path::new(source);
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
-    let dir = data_dir(&app)?.join("images");
+    let dir = data_dir(app)?.join("images");
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     std::fs::copy(source, &dest)
@@ -1332,6 +1521,16 @@ pub fn tts_speak(voice: Option<String>, rate: Option<f32>, text: String) -> Resu
 #[tauri::command]
 pub fn tts_stop() -> Result<()> {
     tts::stop()
+}
+
+#[tauri::command]
+pub fn tts_pause() -> Result<()> {
+    tts::pause()
+}
+
+#[tauri::command]
+pub fn tts_resume() -> Result<()> {
+    tts::resume()
 }
 
 #[tauri::command]

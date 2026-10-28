@@ -10,7 +10,6 @@
   import TableRow from "@tiptap/extension-table-row";
   import TableHeader from "@tiptap/extension-table-header";
   import TableCell from "@tiptap/extension-table-cell";
-  import { open } from "@tauri-apps/plugin-dialog";
   import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { htmlToMarkdown, markdownToHtml } from "$lib/markdown";
 
@@ -179,15 +178,9 @@
   }
 
   async function insertImage() {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      title: "Insertar imagen",
-      filters: [{ name: "Imágenes", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
-    });
-    if (typeof selected !== "string") return;
     try {
-      const path = await invoke<string>("persist_image", { source: selected });
+      const path = await invoke<string | null>("persist_image_dialog");
+      if (!path) return;
       editor
         .chain()
         .focus()

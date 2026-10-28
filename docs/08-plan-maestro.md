@@ -4,6 +4,11 @@
 > los docs `01`–`07` y las convierte en una sola visión coherente: **qué es**, **para
 > quién**, **cómo se organiza** y **hacia dónde va**. Cuando haya dudas de prioridad o de
 > diseño, este plan manda.
+>
+> **Estado (2026):** este documento es la **visión de producto**. Para el estado real de
+> implementación consulta el [README](../README.md), el [CHANGELOG](../CHANGELOG.md) y la
+> [deuda técnica](12-technical-debt.md). Algunas afirmaciones de este plan son intención
+> de diseño, no as-built.
 
 ---
 

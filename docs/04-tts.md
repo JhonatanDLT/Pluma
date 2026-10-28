@@ -3,6 +3,13 @@
 Plan de texto a voz en dos fases: **básico hoy** (voz del sistema operativo) y
 **neural local después** (Piper), con una ruta clara hacia TTS con IA más adelante.
 
+## Estado actual (2026)
+
+- Voz del sistema en macOS, Windows y Linux.
+- Reproducir, pausar/reanudar (macOS/Linux), detener, velocidad y selección de voz.
+- El texto se limpia de Markdown antes de hablarlo.
+- **Pendiente:** TTS neuronal (Piper) y resaltado de la frase en reproducción.
+
 ---
 
 ## 1. Fase 1 — TTS básico (voz del sistema)

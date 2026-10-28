@@ -58,6 +58,9 @@ semántico.
   proyecto no usa subdivisiones, como describe la documentación.
 - **Guía de usuario** (`docs/13-guia-de-usuario.md`) y pasada de verdad sobre
   los docs de producto.
+- **Assets portables:** portadas e imágenes se guardan como rutas relativas al
+  directorio de datos (`covers/…`, `images/…`) y se resuelven a absolutas al
+  abrir/exportar. Migración idempotente para proyectos antiguos.
 
 ### Corregido
 

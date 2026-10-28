@@ -6,6 +6,7 @@ use rusqlite::Connection;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::assets;
 use crate::backup;
 use crate::db::Db;
 use crate::engines::Embedder;
@@ -205,9 +206,14 @@ fn hash_texts(texts: &[String]) -> String {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn list_projects(db: State<'_, Db>) -> Result<Vec<Project>> {
+pub fn list_projects(app: tauri::AppHandle, db: State<'_, Db>) -> Result<Vec<Project>> {
+    let dir = data_dir(&app)?;
     let conn = lock(&db)?;
-    repo::list_projects(&conn)
+    let projects = repo::list_projects(&conn)?;
+    Ok(projects
+        .into_iter()
+        .map(|project| assets::absolutize_project(project, &dir))
+        .collect())
 }
 
 #[tauri::command]
@@ -221,27 +227,42 @@ pub fn create_project(
     cover_path: Option<String>,
 ) -> Result<Project> {
     let cover = persist_cover(&app, cover_path.as_deref())?;
+    let dir = data_dir(&app)?;
     let conn = lock(&db)?;
-    repo::create_project(
+    let project = repo::create_project(
         &conn,
         &title,
         author,
         goal.unwrap_or(3000),
         description,
         cover,
-    )
+    )?;
+    Ok(assets::absolutize_project(project, &dir))
 }
 
 #[tauri::command]
-pub fn rename_project(db: State<'_, Db>, id: String, title: String) -> Result<Project> {
+pub fn rename_project(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    id: String,
+    title: String,
+) -> Result<Project> {
+    let dir = data_dir(&app)?;
     let conn = lock(&db)?;
-    repo::rename_project(&conn, &id, &title)
+    let project = repo::rename_project(&conn, &id, &title)?;
+    Ok(assets::absolutize_project(project, &dir))
 }
 
 #[tauri::command]
-pub fn duplicate_project(db: State<'_, Db>, project_id: String) -> Result<Project> {
+pub fn duplicate_project(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    project_id: String,
+) -> Result<Project> {
+    let dir = data_dir(&app)?;
     let mut guard = lock(&db)?;
-    repo::duplicate_project(&mut guard, &project_id)
+    let project = repo::duplicate_project(&mut guard, &project_id)?;
+    Ok(assets::absolutize_project(project, &dir))
 }
 
 /// Crea un proyecto de demostración con capítulos y escenas para que un usuario
@@ -283,31 +304,44 @@ pub fn delete_project(db: State<'_, Db>, id: String) -> Result<()> {
 }
 
 #[tauri::command]
-pub fn update_project_goal(db: State<'_, Db>, id: String, goal: i64) -> Result<Project> {
+pub fn update_project_goal(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    id: String,
+    goal: i64,
+) -> Result<Project> {
+    let dir = data_dir(&app)?;
     let conn = lock(&db)?;
-    repo::update_project_goal(&conn, &id, goal)
+    let project = repo::update_project_goal(&conn, &id, goal)?;
+    Ok(assets::absolutize_project(project, &dir))
 }
 
 #[tauri::command]
 pub fn update_project_levels(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     id: String,
     level1_name: String,
     level2_name: String,
 ) -> Result<Project> {
+    let dir = data_dir(&app)?;
     let conn = lock(&db)?;
-    repo::update_project_levels(&conn, &id, &level1_name, &level2_name)
+    let project = repo::update_project_levels(&conn, &id, &level1_name, &level2_name)?;
+    Ok(assets::absolutize_project(project, &dir))
 }
 
 #[tauri::command]
 pub fn update_project_meta(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     id: String,
     author: Option<String>,
     description: Option<String>,
 ) -> Result<Project> {
+    let dir = data_dir(&app)?;
     let conn = lock(&db)?;
-    repo::update_project_meta(&conn, &id, author, description)
+    let project = repo::update_project_meta(&conn, &id, author, description)?;
+    Ok(assets::absolutize_project(project, &dir))
 }
 
 // ---------------------------------------------------------------------------
@@ -361,13 +395,24 @@ pub fn create_scene(db: State<'_, Db>, chapter_id: String, title: Option<String>
 }
 
 #[tauri::command]
-pub fn get_scene(db: State<'_, Db>, id: String) -> Result<Scene> {
+pub fn get_scene(app: tauri::AppHandle, db: State<'_, Db>, id: String) -> Result<Scene> {
+    let dir = data_dir(&app)?;
     let conn = lock(&db)?;
-    repo::get_scene(&conn, &id)?.ok_or_else(|| AppError::NotFound(format!("escena {id}")))
+    let mut scene =
+        repo::get_scene(&conn, &id)?.ok_or_else(|| AppError::NotFound(format!("escena {id}")))?;
+    scene.content_markdown = assets::absolutize_markdown(&scene.content_markdown, &dir);
+    Ok(scene)
 }
 
 #[tauri::command]
-pub fn save_scene(db: State<'_, Db>, id: String, content: String) -> Result<Scene> {
+pub fn save_scene(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    id: String,
+    content: String,
+) -> Result<Scene> {
+    let dir = data_dir(&app)?;
+    let content = assets::relativize_markdown(&content, &dir);
     let conn = lock(&db)?;
     repo::save_scene(&conn, &id, &content)
 }
@@ -489,6 +534,7 @@ pub fn import_file_as_project(
         .filter(|s| !s.is_empty())
         .unwrap_or("Documento importado");
 
+    let dir = data_dir(&app)?;
     let cover = persist_cover(&app, cover_path.as_deref())?;
     let markdown = extract::extract_markdown(path)?;
     let manuscript = parser::parse(&markdown);
@@ -503,7 +549,7 @@ pub fn import_file_as_project(
         cover,
     )?;
     repo::import_manuscript(&mut guard, &project.id, &manuscript)?;
-    Ok(project)
+    Ok(assets::absolutize_project(project, &dir))
 }
 
 // ---------------------------------------------------------------------------
@@ -673,8 +719,32 @@ pub fn maybe_auto_backup(conn: &Connection, data_dir: &std::path::Path) -> Resul
 // Exportación
 // ---------------------------------------------------------------------------
 
+/// Construye los metadatos de exportación con las rutas de assets absolutas.
+fn absolutize_export(
+    data_dir: &std::path::Path,
+    project: &Project,
+    content: &mut [(Chapter, Vec<Scene>)],
+) -> export::ExportMeta {
+    for (_, scenes) in content.iter_mut() {
+        for scene in scenes {
+            scene.content_markdown = assets::absolutize_markdown(&scene.content_markdown, data_dir);
+        }
+    }
+    export::ExportMeta {
+        title: project.title.clone(),
+        author: project.author.clone(),
+        description: project.description.clone(),
+        cover_path: project.cover_path.as_deref().map(|p| {
+            assets::to_absolute(p, data_dir)
+                .to_string_lossy()
+                .into_owned()
+        }),
+    }
+}
+
 #[tauri::command(async)]
 pub fn export_project(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     project_id: String,
     format: String,
@@ -682,16 +752,15 @@ pub fn export_project(
 ) -> Result<()> {
     validate_export_path(std::path::Path::new(&path), &format)?;
     let format = export::ExportFormat::from_str(&format)?;
-    let conn = lock(&db)?;
-    let project = repo::get_project(&conn, &project_id)?
-        .ok_or_else(|| AppError::NotFound(format!("proyecto {project_id}")))?;
-    let content = repo::get_project_content(&conn, &project_id)?;
-    let meta = export::ExportMeta {
-        title: project.title,
-        author: project.author,
-        description: project.description,
-        cover_path: project.cover_path,
+    let dir = data_dir(&app)?;
+    let (project, mut content) = {
+        let conn = lock(&db)?;
+        let project = repo::get_project(&conn, &project_id)?
+            .ok_or_else(|| AppError::NotFound(format!("proyecto {project_id}")))?;
+        let content = repo::get_project_content(&conn, &project_id)?;
+        (project, content)
     };
+    let meta = absolutize_export(&dir, &project, &mut content);
     export::export(&meta, &content, format, std::path::Path::new(&path))
 }
 
@@ -719,7 +788,8 @@ pub fn export_project_dialog(
     };
 
     // Lee los datos con el lock y suéltalo antes de abrir el diálogo/exportar.
-    let (project, content) = {
+    let dir = data_dir(&app)?;
+    let (project, mut content) = {
         let conn = lock(&db)?;
         let project = repo::get_project(&conn, &project_id)?
             .ok_or_else(|| AppError::NotFound(format!("proyecto {project_id}")))?;
@@ -733,12 +803,7 @@ pub fn export_project_dialog(
     };
     validate_export_path(&path, &format)?;
 
-    let meta = export::ExportMeta {
-        title: project.title,
-        author: project.author,
-        description: project.description,
-        cover_path: project.cover_path,
-    };
+    let meta = absolutize_export(&dir, &project, &mut content);
     export::export(&meta, &content, export_format, &path)?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
@@ -1365,13 +1430,15 @@ fn persist_cover(app: &tauri::AppHandle, source: Option<&str>) -> Result<Option<
     validate_image_path(source)?;
 
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let name = format!("{}.{ext}", uuid::Uuid::new_v4());
     let dir = data_dir(app)?.join("covers");
     std::fs::create_dir_all(&dir)?;
-    let dest = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+    let dest = dir.join(&name);
 
     std::fs::copy(source, &dest)
         .map_err(|e| AppError::Internal(format!("no se pudo copiar la portada: {e}")))?;
-    Ok(Some(dest.to_string_lossy().into_owned()))
+    // Ruta relativa al directorio de datos: el proyecto es portable.
+    Ok(Some(format!("covers/{name}")))
 }
 
 /// Copia una imagen insertada en el editor al directorio de datos de la app y
@@ -1402,7 +1469,8 @@ fn persist_image_impl(app: &tauri::AppHandle, source: &str) -> Result<String> {
     let dest = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     std::fs::copy(source, &dest)
         .map_err(|e| AppError::Internal(format!("no se pudo copiar la imagen: {e}")))?;
-    Ok(dest.to_string_lossy().into_owned())
+    // Se devuelve con `/` para que el Markdown sea válido también en Windows.
+    Ok(dest.to_string_lossy().replace('\\', "/"))
 }
 
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf> {

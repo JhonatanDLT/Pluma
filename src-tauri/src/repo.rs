@@ -165,11 +165,9 @@ pub fn insert_project_snapshot(
 ) -> Result<Project> {
     let source = &snapshot.project;
     let new_project = Project::new(format!("{} ({title_suffix})", source.title));
-    let cover = source
-        .cover_path
-        .as_deref()
-        .filter(|p| std::path::Path::new(p).is_file())
-        .map(str::to_string);
+    // Las rutas de assets son relativas al directorio de datos; se conservan
+    // tal cual. Si el archivo falta, la UI mostrará la portada vacía.
+    let cover = source.cover_path.clone();
 
     let tx = conn.transaction()?;
     tx.execute(

@@ -1,3 +1,4 @@
+mod assets;
 mod backup;
 mod commands;
 mod db;
@@ -88,8 +89,10 @@ pub fn run() {
             let db = db::Db::open(&dir.join("pluma.db"))?;
             log::info!("Pluma iniciada; datos en {}", dir.display());
             crate::engines::verify_model_revisions(&dir);
-            // Copia automática diaria antes de que el usuario empiece a escribir.
             if let Ok(conn) = db.conn.lock() {
+                // Migración idempotente: rutas absolutas antiguas → relativas.
+                let _ = crate::assets::normalize_existing(&conn, &dir);
+                // Copia automática diaria antes de que el usuario escriba.
                 let _ = crate::commands::maybe_auto_backup(&conn, &dir);
             }
             app.manage(db);

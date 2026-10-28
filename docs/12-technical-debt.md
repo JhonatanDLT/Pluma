@@ -67,7 +67,7 @@ criterio de aceptación.
 | --- | --- | --- | --- | --- | --- |
 | TD-27 | Solo se crean backups; no hay UI para restaurarlos. | El backup no es útil sin restauración. | P1 | 2d | Listar backups, restaurar como proyecto nuevo y validar integridad. |
 | TD-28 | Snapshots viven en la misma BD. | Un archivo corrupto pierde todo. | P2 | 1d | Exportar snapshots a `.zip` externo. |
-| TD-29 | Rutas de imágenes/portada son absolutas. | Proyectos no portables entre equipos. | P1 | 2d | Rutas relativas al directorio de datos y exportación con assets. |
+| TD-29 | Rutas de imágenes/portada son absolutas. | Proyectos no portables entre equipos. | P1 | 2d | ✅ Rutas relativas al directorio de datos, conversión en los comandos, migración idempotente y exportación con assets resueltos. Pendiente: bundle `.zip` de proyecto con DB+assets. |
 | TD-30 | Sin `PRAGMA integrity_check` al arrancar. | Corrupción silenciosa. | P1 | 1d | Chequeo rápido + aviso y restauración desde backup. |
 | TD-31 | Exportación no atómica. | Archivo truncado si falla a mitad. | P1 | 0,5d | Escribir a temporal + rename. |
 | TD-32 | Sin protección de downgrade de migraciones. | Un binario viejo puede corromper el esquema. | P1 | 1d | Guardar versión mínima y bloquear downgrades. |

@@ -64,6 +64,10 @@ semántico.
 - **Pool de conexiones SQLite:** se sustituye el `Mutex<Connection>` único por
   un pool pequeño con WAL, `busy_timeout` y `foreign_keys` por conexión. Las
   consultas cortas ya no se serializan detrás de un lock global.
+- **Modo zen** (`Ctrl/Cmd+Shift+M`): oculta topbar, paneles y ribbon; deja solo
+  el texto con un chip flotante para volver.
+- **Plan de la Wiki** (`docs/14-wiki-grafo.md`): grafo de personajes,
+  facciones y lugares, campos personalizados y enriquecimiento con evidencia.
 
 ### Corregido
 

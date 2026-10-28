@@ -58,7 +58,9 @@
 
   let mode = $state<EditorMode>("wysiwyg");
   let focusMode = $state(false);
+  let zenMode = $state(false);
   let searchOpen = $state(false);
+  const hideChrome = $derived(focusMode || zenMode);
   let saveState = $state<SaveState>("idle");
 
   const RECENT_KEY = "pluma.recentProjects";
@@ -337,6 +339,11 @@
         if (selectedProjectId) searchOpen = !searchOpen;
         return;
       }
+      if (mod && e.shiftKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        zenMode = !zenMode;
+        return;
+      }
       if (mod && e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         focusMode = !focusMode;
@@ -344,10 +351,22 @@
       }
       if (
         e.key === "Escape" &&
+        zenMode &&
+        !worldOpen &&
+        !switcherOpen &&
+        !spellOpen &&
+        !searchOpen
+      ) {
+        zenMode = false;
+        return;
+      }
+      if (
+        e.key === "Escape" &&
         focusMode &&
         !worldOpen &&
         !switcherOpen &&
-        !spellOpen
+        !spellOpen &&
+        !searchOpen
       ) {
         focusMode = false;
         return;
@@ -1515,8 +1534,8 @@
       onimportproject={importProject}
     />
   {:else}
-    <div class="workspace" class:focus={focusMode}>
-      {#if !focusMode && !chaptersCollapsed}
+    <div class="workspace" class:focus={hideChrome}>
+      {#if !hideChrome && !chaptersCollapsed}
         <aside class="panel" style:width="{chaptersWidth}px">
           <ChaptersPanel
             {chapters}
@@ -1543,7 +1562,7 @@
         <button class="collapsed-tab" onclick={() => (chaptersCollapsed = false)}>{selectedProject?.level1_name ?? "Capítulos"}</button>
       {/if}
 
-      {#if !focusMode && viewMode === "split" && projectUsesScenes}
+      {#if !hideChrome && viewMode === "split" && projectUsesScenes}
         {#if !scenesCollapsed}
           <aside class="panel" style:width="{scenesWidth}px">
             <ScenesPanel
@@ -1564,6 +1583,7 @@
       {/if}
 
       <main class="main">
+    {#if !zenMode}
     <header class="topbar">
       <div class="crumbs">
         <button class="btn-icon" title="Volver a proyectos" onclick={backToProjects}>‹</button>
@@ -1691,6 +1711,13 @@
         >⌕</button>
 
         <button
+          class="btn-icon"
+          title="Modo zen: ocultar todos los menús (Ctrl/Cmd+Shift+M)"
+          aria-label="Activar modo zen"
+          onclick={() => (zenMode = true)}
+        >▢</button>
+
+        <button
           class="btn-icon focus-exit"
           title={focusMode
             ? "Salir del modo foco (Esc)"
@@ -1700,6 +1727,28 @@
         >{focusMode ? "⤢" : "⛶"}</button>
       </div>
     </header>
+    {:else}
+      <div class="zen-pill" role="status">
+        {#if selectedSceneId}
+          <span class="wordcount">{wordCount.toLocaleString()} palabras</span>
+        {/if}
+        <span
+          class="save-status"
+          class:error={saveState === "error"}
+          aria-live="polite"
+        >
+          {#if saveState === "saving"}Guardando…{/if}
+          {#if saveState === "saved"}Guardado{/if}
+          {#if saveState === "error"}Error al guardar{/if}
+        </span>
+        <button
+          class="btn-icon"
+          title="Salir del modo zen (Esc)"
+          aria-label="Salir del modo zen"
+          onclick={() => (zenMode = false)}
+        >⤢</button>
+      </div>
+    {/if}
 
     {#if errorMsg}
       <div class="banner">
@@ -1740,7 +1789,7 @@
             <Editor
               content={sceneContent}
               onchange={onContentChange}
-              focus={focusMode}
+              focus={hideChrome}
               revision={editorRevision}
             />
           {:else}
@@ -1770,7 +1819,7 @@
     </div>
   </main>
 
-      {#if !focusMode && optionsOpen}
+      {#if !hideChrome && optionsOpen}
         <button class="divider" type="button" aria-label="Ajustar ancho" onmousedown={() => beginDrag("options")}></button>
         <aside class="panel panel-right" style:width="{optionsWidth}px">
           <OptionsPanel
@@ -1934,6 +1983,30 @@
     flex-direction: column;
     min-width: 0;
     background: var(--bg);
+    position: relative;
+  }
+
+  /* Modo zen: todos los menús ocultos, solo un chip flotante discreto. */
+  .zen-pill {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    opacity: 0.35;
+    transition: opacity 0.18s;
+  }
+
+  .zen-pill:hover,
+  .zen-pill:focus-within {
+    opacity: 1;
   }
 
   .topbar {

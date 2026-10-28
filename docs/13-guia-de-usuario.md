@@ -40,10 +40,14 @@ En la pantalla de proyectos puedes:
 - **Centro:** editor. Arriba tienes el formato y las acciones principales.
 - **Panel derecho:** asistente, metadatos, versiones, copias y ajustes.
 
-### Modo foco
+### Modo foco y modo zen
 
-Pulsa `Ctrl/Cmd+Shift+F` o el icono `⛶`. Se ocultan los paneles y la cinta para
-dejar solo el texto. Sal con `Esc` o el mismo atajo.
+- **Modo foco** (`Ctrl/Cmd+Shift+F` o `⛶`): oculta los paneles y la cinta, pero
+  mantiene la barra superior.
+- **Modo zen** (`Ctrl/Cmd+Shift+M` o `▢`): oculta **todos** los menús, incluida
+  la barra superior. Solo queda el texto y un chip flotante con el recuento, el
+  estado de guardado y el botón para salir.
+- Sal de cualquiera con `Esc` o el mismo atajo.
 
 ### Tipografía
 
@@ -145,6 +149,7 @@ falla, no deja un archivo a medias.
 | `Ctrl/Cmd+K` | Ir a capítulo/escena |
 | `Ctrl/Cmd+Shift+P` | Buscar en toda la novela |
 | `Ctrl/Cmd+Shift+F` | Modo foco |
+| `Ctrl/Cmd+Shift+M` | Modo zen (ocultar todos los menús) |
 | `Esc` | Salir del modo foco / cerrar diálogo |
 | `Ctrl/Cmd+F` | Buscar y reemplazar en la escena |
 | `Ctrl/Cmd+Alt+↑/↓` | Capítulo anterior/siguiente |

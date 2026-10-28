@@ -242,6 +242,7 @@ cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 | [`docs/11-next-steps.md`](docs/11-next-steps.md) | Pasos que requieren credenciales, servidor o decisiones de producto |
 | [`docs/12-technical-debt.md`](docs/12-technical-debt.md) | Deuda técnica priorizada (P0–P3) y sprints 4–7 |
 | [`docs/13-guia-de-usuario.md`](docs/13-guia-de-usuario.md) | Guía práctica: escribir, biblia, IA, backups, atajos y problemas |
+| [`docs/14-wiki-grafo.md`](docs/14-wiki-grafo.md) | Plan de la Wiki: grafo, campos personalizados y enriquecimiento con evidencia |
 | [`CHANGELOG.md`](CHANGELOG.md) | Historial de cambios |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Licencias de componentes de terceros |
 

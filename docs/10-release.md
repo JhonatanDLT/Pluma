@@ -38,6 +38,10 @@ la incluye en el bundle y `runtime::prepare` la prefiere sobre la copia
 descargada. En macOS, la dylib se firma junto con la app, lo que permite eliminar
 el entitlement `disable-library-validation`.
 
+El workflow `.github/workflows/release.yml` ejecuta el script automáticamente
+antes de `tauri-action`. En macOS Intel (x86_64) el script avisa y continúa sin
+IA local, porque ONNX Runtime 1.28 no publica build para esa arquitectura.
+
 ## 3. Firma y notarización
 
 ### macOS

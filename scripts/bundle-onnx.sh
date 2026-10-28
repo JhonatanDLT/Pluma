@@ -30,10 +30,15 @@ case "$OS-$ARCH" in
     SHA="e15ff8b5d85afe6c144d97c6fd432254bf76a219daaf17658087d6ecb3e8f0bb"
     LIB="libonnxruntime.so"
     ;;
+  Darwin-x86_64)
+    echo "AVISO: ONNX Runtime 1.28 no publica build para macOS Intel." >&2
+    echo "La app funcionará sin IA local en este equipo (solo reglas)." >&2
+    exit 0
+    ;;
   *)
-    echo "Plataforma no soportada por este script: $OS-$ARCH" >&2
-    echo "En Windows usa scripts/bundle-onnx.ps1." >&2
-    exit 1
+    echo "AVISO: plataforma no soportada por ONNX Runtime ($OS-$ARCH)." >&2
+    echo "Se omite el empaquetado; en Windows usa scripts/bundle-onnx.ps1." >&2
+    exit 0
     ;;
 esac
 

@@ -58,6 +58,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Bundle ONNX Runtime (macOS/Linux)
+        if: matrix.os != 'windows-latest'
+        run: ./scripts/bundle-onnx.sh
+
+      - name: Bundle ONNX Runtime (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/bundle-onnx.ps1
+
       # Nota: la firma y notarización se configuran con los secretos del repo.
       # Ver docs/10-release.md para la lista completa y el procedimiento.
       - name: Build and publish Tauri app

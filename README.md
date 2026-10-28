@@ -230,6 +230,8 @@ cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 | [`docs/09-roadmap-v1.md`](docs/09-roadmap-v1.md) | Roadmap priorizado de V1.0 |
 | [`docs/10-release.md`](docs/10-release.md) | Firma, notarización, updater y checklist de release |
 | [`docs/11-next-steps.md`](docs/11-next-steps.md) | Pasos que requieren credenciales, servidor o decisiones de producto |
+| [`CHANGELOG.md`](CHANGELOG.md) | Historial de cambios |
+| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Licencias de componentes de terceros |
 
 ---
 

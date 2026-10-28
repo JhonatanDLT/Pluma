@@ -9,6 +9,7 @@
   import WorldBuilding from "$lib/components/WorldBuilding.svelte";
   import SpellPanel from "$lib/components/SpellPanel.svelte";
   import QuickSwitcher from "$lib/components/QuickSwitcher.svelte";
+  import SearchPanel from "$lib/components/SearchPanel.svelte";
   import * as api from "$lib/api";
   import { applyTheme, getTheme } from "$lib/theme";
   import {
@@ -57,6 +58,7 @@
 
   let mode = $state<EditorMode>("wysiwyg");
   let focusMode = $state(false);
+  let searchOpen = $state(false);
   let saveState = $state<SaveState>("idle");
 
   const RECENT_KEY = "pluma.recentProjects";
@@ -277,6 +279,11 @@
   onMount(() => {
     function onKey(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        if (selectedProjectId) searchOpen = !searchOpen;
+        return;
+      }
       if (mod && e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         focusMode = !focusMode;
@@ -1577,6 +1584,13 @@
         </div>
 
         <button
+          class="btn-icon"
+          title="Buscar en la novela (Ctrl/Cmd+Shift+P)"
+          aria-label="Buscar en la novela"
+          onclick={() => (searchOpen = true)}
+        >⌕</button>
+
+        <button
           class="btn-icon focus-exit"
           title={focusMode
             ? "Salir del modo foco (Esc)"
@@ -1686,6 +1700,17 @@
         </aside>
       {/if}
     </div>
+  {/if}
+
+  {#if searchOpen && selectedProjectId}
+    <SearchPanel
+      projectId={selectedProjectId}
+      onselect={(chapterId, sceneId) => {
+        searchOpen = false;
+        void goToSceneInChapter(chapterId, sceneId);
+      }}
+      onclose={() => (searchOpen = false)}
+    />
   {/if}
 
   {#if switcherOpen}

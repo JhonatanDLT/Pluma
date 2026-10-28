@@ -54,14 +54,36 @@ pub fn export(
     format: ExportFormat,
     path: &Path,
 ) -> Result<()> {
-    match format {
-        ExportFormat::Markdown => write_text(path, &build_markdown(meta, content)),
-        ExportFormat::Txt => write_text(path, &build_plain_text(meta, content)),
-        ExportFormat::Html => write_text(path, &build_html(meta, content)),
-        ExportFormat::Docx => export_docx(meta, content, path),
-        ExportFormat::Pdf => export_pdf(meta, content, path),
-        ExportFormat::Epub => export_epub(meta, content, path),
+    // Escribe primero a un temporal en el mismo directorio y renombra al final:
+    // si el proceso falla a mitad, el archivo destino no queda truncado.
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("export");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
+    let tmp = parent.join(format!(
+        ".{stem}.{}.tmp.{ext}",
+        uuid::Uuid::new_v4()
+    ));
+
+    let result = match format {
+        ExportFormat::Markdown => write_text(&tmp, &build_markdown(meta, content)),
+        ExportFormat::Txt => write_text(&tmp, &build_plain_text(meta, content)),
+        ExportFormat::Html => write_text(&tmp, &build_html(meta, content)),
+        ExportFormat::Docx => export_docx(meta, content, &tmp),
+        ExportFormat::Pdf => export_pdf(meta, content, &tmp),
+        ExportFormat::Epub => export_epub(meta, content, &tmp),
+    };
+
+    if result.is_ok() {
+        std::fs::rename(&tmp, path).map_err(|e| {
+            AppError::Internal(format!("no se pudo finalizar la exportación: {e}"))
+        })?;
+    } else {
+        let _ = std::fs::remove_file(&tmp);
     }
+    result
 }
 
 fn write_text(path: &Path, text: &str) -> Result<()> {
@@ -1182,7 +1204,6 @@ fn build_opf(
 fn build_cover_xhtml(image_name: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><title>Portada</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
 <body class="cover-page">
@@ -1231,7 +1252,6 @@ fn build_nav_xhtml(chapters: &[(String, String)]) -> String {
     }
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head><title>Índice</title></head>
 <body>
@@ -1249,7 +1269,6 @@ fn build_nav_xhtml(chapters: &[(String, String)]) -> String {
 fn build_chapter_xhtml(title: &str, body: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><title>{title}</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
 <body>
@@ -1590,5 +1609,54 @@ mod tests {
         assert!(paths.contains(&"/a/b.png".to_string()));
         assert!(paths.contains(&"/c/d.png".to_string()));
         assert!(!paths.iter().any(|p| p.contains("https://")));
+    }
+
+    fn sample_content() -> (ExportMeta, Vec<(Chapter, Vec<Scene>)>) {
+        let meta = ExportMeta {
+            title: "Prueba".into(),
+            author: Some("Autora".into()),
+            description: Some("Descripción".into()),
+            cover_path: None,
+        };
+        let chapter = Chapter::new("p1", "Capítulo 1", 1);
+        let mut scene = Scene::new(&chapter.id, 1, Some("La llegada".into()));
+        scene.content_markdown = "Elena caminó hasta el faro.\n\nY sonrió.".into();
+        (meta, vec![(chapter, vec![scene])])
+    }
+
+    #[test]
+    fn markdown_export_is_atomic_and_replaces_destination() {
+        let (meta, content) = sample_content();
+        let dir = std::env::temp_dir().join(format!("pluma-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prueba.md");
+        std::fs::write(&path, "viejo").unwrap();
+
+        export(&meta, &content, ExportFormat::Markdown, &path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("Elena caminó hasta el faro."));
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "quedaron temporales: {leftovers:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn epub_round_trip_preserves_text() {
+        let (meta, content) = sample_content();
+        let dir = std::env::temp_dir().join(format!("pluma-epub-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prueba.epub");
+
+        export(&meta, &content, ExportFormat::Epub, &path).unwrap();
+        let text = crate::extract::extract_markdown(&path).unwrap();
+        assert!(text.contains("Elena caminó hasta el faro."));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -93,6 +93,7 @@ pub fn run() {
             commands::save_scene,
             commands::delete_scene,
             commands::list_navigation,
+            commands::search_project,
             commands::import_markdown,
             commands::import_file,
             commands::import_file_as_project,

@@ -12,7 +12,7 @@ use crate::extract;
 use crate::llm;
 use crate::models::{
     AnalysisReport, Chapter, Character, Entity, NavEntry, Project, Relationship, Scene, SceneMeta,
-    SnapshotMeta,
+    SearchHit, SnapshotMeta,
 };
 use crate::nlp;
 use crate::parser;
@@ -436,6 +436,18 @@ pub fn move_scene(
 ) -> Result<Vec<SceneMeta>> {
     let conn = lock(&db)?;
     repo::move_scene(&conn, &chapter_id, &id, new_position)
+}
+
+/// Busca en todo el contenido de las escenas del proyecto (FTS5).
+#[tauri::command]
+pub fn search_project(
+    db: State<'_, Db>,
+    project_id: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<SearchHit>> {
+    let conn = lock(&db)?;
+    repo::search_project(&conn, &project_id, &query, limit.unwrap_or(20))
 }
 
 /// Archivos abiertos por asociación o línea de comandos, pendientes de procesar

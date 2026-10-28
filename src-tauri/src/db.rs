@@ -16,6 +16,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_cover.sql"),
     include_str!("../migrations/0008_level_names.sql"),
     include_str!("../migrations/0009_embeddings.sql"),
+    include_str!("../migrations/0010_fts.sql"),
 ];
 
 /// Conexión a SQLite compartida entre comandos.
@@ -42,6 +43,14 @@ impl Db {
         )?;
 
         migrate(&mut conn)?;
+
+        // Comprobación rápida de integridad: avisa sin impedir el arranque para
+        // que el usuario aún pueda exportar o restaurar una copia.
+        if let Ok(status) = conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0)) {
+            if status != "ok" {
+                eprintln!("[pluma] advertencia: quick_check de SQLite: {status}");
+            }
+        }
 
         Ok(Self {
             conn: Mutex::new(conn),

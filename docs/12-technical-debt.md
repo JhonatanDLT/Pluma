@@ -123,13 +123,16 @@ criterio de aceptación.
 - Asociaciones de archivos y drag-and-drop (TD-36).
 - Panel derecho cerrado por defecto (TD-40).
 
-### Sprint 5 — Búsqueda, datos y exportación
+### Sprint 5 — Búsqueda, datos y exportación (en curso)
 
-- Búsqueda FTS5 server-side y UI global.
-- Restauración de backups (TD-27).
-- Rutas relativas de assets (TD-29).
-- Integridad de BD y exportación atómica (TD-30, TD-31).
-- Tests de exportación round-trip (TD-50).
+> Estado: búsqueda FTS5 + UI, exportación atómica (TD-31), `quick_check` al
+> arrancar (TD-30) y round-trip EPUB (parte de TD-50) completados.
+
+- Búsqueda FTS5 server-side y UI global. ✅
+- Integridad de BD y exportación atómica (TD-30, TD-31). ✅
+- Tests de exportación round-trip (TD-50). 🚧 (EPUB hecho; faltan DOCX/PDF)
+- Restauración de backups (TD-27). Pendiente.
+- Rutas relativas de assets (TD-29). Pendiente.
 
 ### Sprint 6 — Accesibilidad y confianza
 

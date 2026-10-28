@@ -14,6 +14,7 @@ import type {
   Relationship,
   Scene,
   SceneMeta,
+  SearchHit,
   SnapshotMeta,
   SpellReport,
 } from "./types";
@@ -61,6 +62,12 @@ export const deleteChapter = (id: string) =>
 // Escenas
 export const listScenes = (chapterId: string) =>
   invoke<SceneMeta[]>("list_scenes", { chapterId });
+export const searchProject = (
+  projectId: string,
+  query: string,
+  limit: number | null = 20,
+) => invoke<SearchHit[]>("search_project", { projectId, query, limit });
+
 export const listNavigation = (projectId: string) =>
   invoke<NavEntry[]>("list_navigation", { projectId });
 export const createScene = (chapterId: string, title: string | null) =>

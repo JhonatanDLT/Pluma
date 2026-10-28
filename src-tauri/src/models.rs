@@ -226,3 +226,14 @@ pub struct NavEntry {
     pub scene_id: Option<String>,
     pub scene_title: Option<String>,
 }
+
+/// Resultado de una búsqueda full-text en las escenas de un proyecto.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchHit {
+    pub scene_id: String,
+    pub chapter_id: String,
+    pub chapter_title: String,
+    pub scene_title: Option<String>,
+    /// Fragmento con las coincidencias marcadas con `<mark>…</mark>`.
+    pub snippet: String,
+}

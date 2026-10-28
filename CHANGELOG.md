@@ -15,6 +15,17 @@ semántico.
 - **Proyectos recientes**: los últimos cinco se marcan en la vista de proyectos.
 - **Apertura de archivos** por asociación (`.md`, `.txt`, `.docx`, `.epub`) y
   por drag-and-drop sobre la ventana.
+- **Búsqueda full-text** (`Ctrl/Cmd+Shift+P`) en toda la novela con SQLite FTS5,
+  resultados ordenados por relevancia y salto directo a la escena.
+- **Exportación atómica:** se escribe a un temporal y se renombra, para no dejar
+  archivos truncados si falla a mitad.
+- **Comprobación de integridad** de SQLite (`quick_check`) al arrancar.
+
+### Corregido
+
+- Los EPUB exportados ahora se pueden reimportar (se eliminó el `DOCTYPE` que
+  `roxmltree` rechazaba) y los EPUB de otras herramientas con `DOCTYPE` también
+  se leen correctamente.
 
 ## [1.0.0] — 2026-10-28
 

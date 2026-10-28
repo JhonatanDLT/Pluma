@@ -320,8 +320,18 @@ fn parse_opf(xml: &str) -> Result<(HashMap<String, ManifestItem>, Vec<String>)> 
 }
 
 /// Convierte un documento XHTML en Markdown, mapeando encabezados y párrafos.
+/// Parsea un documento XHTML de EPUB.
+///
+/// `roxmltree` rechaza el `<!DOCTYPE html>` de HTML5, que es habitual en EPUBs
+/// de otras herramientas. Se descarta la declaración XML y el DOCTYPE, y se
+/// parsea desde la etiqueta `<html>`.
+fn parse_xhtml(xml: &str) -> Option<roxmltree::Document<'_>> {
+    let start = xml.find("<html").or_else(|| xml.find("<HTML"))?;
+    roxmltree::Document::parse(&xml[start..]).ok()
+}
+
 fn xhtml_to_markdown(xml: &str) -> String {
-    let Ok(doc) = roxmltree::Document::parse(xml) else {
+    let Some(doc) = parse_xhtml(xml) else {
         return String::new();
     };
 
@@ -355,9 +365,7 @@ fn xhtml_to_markdown(xml: &str) -> String {
 }
 
 fn xhtml_title(xml: &str) -> Option<String> {
-    let Ok(doc) = roxmltree::Document::parse(xml) else {
-        return None;
-    };
+    let doc = parse_xhtml(xml)?;
     if let Some(title) = doc.descendants().find(|n| n.tag_name().name() == "title") {
         let s = node_text(title).trim().to_string();
         if !s.is_empty() {
@@ -423,5 +431,14 @@ mod tests {
         let md = document_xml_to_markdown(xml);
         assert!(md.contains("# Capítulo 1"));
         assert!(md.contains("Hola mundo"));
+    }
+
+    #[test]
+    fn parses_xhtml_with_doctype() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hola</p></body></html>"#;
+        let doc = parse_xhtml(xml).expect("XHTML con doctype");
+        assert!(doc.descendants().any(|n| n.tag_name().name() == "p"));
     }
 }

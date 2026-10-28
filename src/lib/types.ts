@@ -105,6 +105,14 @@ export interface Entity {
   updated_at: string;
 }
 
+export interface SearchHit {
+  scene_id: string;
+  chapter_id: string;
+  chapter_title: string;
+  scene_title: string | null;
+  snippet: string;
+}
+
 export interface IaSettings {
   ner_engine: string;
   embeddings: boolean;

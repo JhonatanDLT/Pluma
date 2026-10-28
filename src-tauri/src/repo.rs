@@ -18,7 +18,8 @@ pub fn normalize_key(s: &str) -> String {
 
 use crate::error::{AppError, Result};
 use crate::models::{
-    Chapter, Character, Entity, NavEntry, Project, Relationship, Scene, SceneMeta, SnapshotMeta,
+    Chapter, Character, Entity, NavEntry, Project, Relationship, Scene, SceneMeta, SearchHit,
+    SnapshotMeta,
 };
 use crate::parser::ParsedManuscript;
 
@@ -664,6 +665,52 @@ pub fn get_project_content(
         content.push((chapter, scenes));
     }
     Ok(content)
+}
+
+/// Busca en el contenido de las escenas de un proyecto usando FTS5.
+///
+/// La consulta se convierte en una conjunción de términos entrecomillados para
+/// que caracteres como `"` o `*` no rompan la sintaxis de FTS5. Devuelve los
+/// resultados ordenados por relevancia (`bm25`) con un fragmento resaltado.
+pub fn search_project(
+    conn: &Connection,
+    project_id: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<SearchHit>> {
+    let terms: Vec<String> = query
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+        .collect();
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let fts_query = terms.join(" AND ");
+    let limit = limit.clamp(1, 100) as i64;
+
+    let mut stmt = conn.prepare(
+        "SELECT scene_fts.scene_id, scene_fts.chapter_id, c.title, s.title,
+                snippet(scene_fts, 4, '<mark>', '</mark>', '…', 14)
+         FROM scene_fts
+         JOIN scene s ON s.id = scene_fts.scene_id
+         JOIN chapter c ON c.id = scene_fts.chapter_id
+         WHERE scene_fts MATCH ?1 AND scene_fts.project_id = ?2
+         ORDER BY bm25(scene_fts)
+         LIMIT ?3",
+    )?;
+    let hits = stmt
+        .query_map(params![fts_query, project_id, limit], |row| {
+            Ok(SearchHit {
+                scene_id: row.get(0)?,
+                chapter_id: row.get(1)?,
+                chapter_title: row.get(2)?,
+                scene_title: row.get(3)?,
+                snippet: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(hits)
 }
 
 /// Índice plano de navegación: una fila por escena (con su capítulo) y una fila
@@ -1772,5 +1819,67 @@ mod tests {
         assert!(insert.as_secs() < 15, "inserción lenta: {insert:?}");
         assert!(read.as_secs() < 2, "lectura lenta: {read:?}");
         println!("500k palabras → inserción {insert:?}, lectura {read:?}");
+    }
+    #[test]
+    fn search_project_finds_content_and_updates_index() {
+        let conn = crate::db::test_connection();
+        let project = create_project(&conn, "Búsqueda", None, 5000, None, None).unwrap();
+        let chapter = Chapter::new(&project.id, "Cap 1", 1);
+        conn.execute(
+            "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
+             VALUES (?1, ?2, ?3, ?4, 'draft', NULL, 0)",
+            params![
+                chapter.id,
+                chapter.project_id,
+                chapter.position,
+                chapter.title
+            ],
+        )
+        .unwrap();
+        let scene = Scene::new(&chapter.id, 1, Some("La posada".into()));
+        conn.execute(
+            "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary,
+             word_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'Elena caminó hasta la taberna de Vela.', NULL, 7, ?5, ?5)",
+            params![
+                scene.id,
+                scene.chapter_id,
+                scene.position,
+                scene.title,
+                scene.created_at
+            ],
+        )
+        .unwrap();
+
+        let hits = search_project(&conn, &project.id, "taberna", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.contains("taberna"));
+        assert_eq!(hits[0].chapter_title, "Cap 1");
+        assert_eq!(hits[0].scene_title.as_deref(), Some("La posada"));
+
+        conn.execute(
+            "UPDATE scene SET content_markdown = 'Elena navegó hacia el faro.' WHERE id = ?1",
+            params![scene.id],
+        )
+        .unwrap();
+        assert!(
+            search_project(&conn, &project.id, "taberna", 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            search_project(&conn, &project.id, "faro", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        conn.execute("DELETE FROM scene WHERE id = ?1", params![scene.id])
+            .unwrap();
+        assert!(
+            search_project(&conn, &project.id, "faro", 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

@@ -38,8 +38,8 @@ semántico.
 - `cargo clippy -D warnings` en CI y limpieza de los avisos existentes.
 - Workflow semanal de auditoría de dependencias (`pnpm audit` bloqueante,
   `cargo audit` informativo).
-- **RAG sin lock de BD:** el embedding se ejecuta con el lock de SQLite liberado
-  y se persiste en una transacción aparte.
+- **RAG sin lock de BD:** la indexación y la consulta del chat embeben con el
+  lock de SQLite liberado; solo se bloquea para leer/escribir el índice.
 - **Instalación de GLiNER2 sin cargar 1 GB:** el botón «Instalar» descarga el
   checkpoint con `hub::download` sin crear las sesiones ONNX.
 - **Verificación de revisión de modelos:** aviso en el log si GLiNER2 o los

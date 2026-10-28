@@ -1,8 +1,6 @@
 //! Retrieval-Augmented Generation: indexa las escenas de un proyecto por
 //! similitud semántica y recupera las más relevantes para dar contexto al chat.
 
-use rusqlite::Connection;
-
 use crate::engines::Embedder;
 use crate::error::Result;
 
@@ -25,34 +23,18 @@ pub fn embed_scenes<E: Embedder>(
         .collect())
 }
 
-/// Recupera los textos de las top-k escenas más similares a `query`.
-pub fn retrieve<E: Embedder>(
-    conn: &Connection,
-    project_id: &str,
-    query: &str,
+/// Devuelve los IDs de las `top_k` escenas más similares a `query_embedding`.
+/// No toca la base de datos: permite embeber la consulta con el lock liberado.
+pub fn top_scene_ids(
+    stored: &[(String, Vec<f32>)],
+    query_embedding: &[f32],
     top_k: usize,
-    embedder: &mut E,
-) -> Result<Vec<String>> {
-    let stored = crate::repo::list_embeddings(conn, project_id)?;
-    if stored.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let query_embedding = embedder
-        .embed(&[query.to_string()])?
+) -> Vec<String> {
+    rank(stored, query_embedding)
         .into_iter()
-        .next()
-        .unwrap_or_default();
-
-    let mut texts = Vec::new();
-    for (_, scene_id) in rank(&stored, &query_embedding).into_iter().take(top_k) {
-        if let Some(scene) = crate::repo::get_scene(conn, &scene_id)?
-            && !scene.content_markdown.trim().is_empty()
-        {
-            texts.push(scene.content_markdown);
-        }
-    }
-    Ok(texts)
+        .take(top_k)
+        .map(|(_, scene_id)| scene_id)
+        .collect()
 }
 
 /// Ordena `(scene_id, embedding)` por similitud coseno con `query`, de mayor a menor.

@@ -8,6 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::backup;
 use crate::db::Db;
+use crate::engines::Embedder;
 use crate::error::{AppError, Result};
 use crate::export;
 use crate::extract;
@@ -1187,12 +1188,16 @@ fn retrieve_context(
         return Ok(Vec::new());
     }
 
-    // Comprobación rápida: ¿el proyecto tiene índice?
-    {
+    // Lee el índice con el lock y suéltalo antes de embeber la consulta.
+    let stored = {
         let conn = lock(db)?;
         if !repo::has_embeddings(&conn, project_id)? {
             return Ok(Vec::new());
         }
+        repo::list_embeddings(&conn, project_id)?
+    };
+    if stored.is_empty() {
+        return Ok(Vec::new());
     }
 
     // Reutiliza el modelo cacheado (perfil keep_loaded) en lugar de recargarlo.
@@ -1202,16 +1207,35 @@ fn retrieve_context(
         *embedder_guard = crate::engines::create_embedder(settings, &embedder_cache_dir(app)?);
     }
 
-    let conn = lock(db)?;
-    let result = match embedder_guard.as_mut() {
-        Some(embedder) => rag::retrieve(&conn, project_id, query, rag::TOP_K, embedder),
-        None => Ok(Vec::new()),
+    let scene_ids = match embedder_guard.as_mut() {
+        Some(embedder) => {
+            let query_embedding = embedder
+                .embed(&[query.to_string()])?
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            rag::top_scene_ids(&stored, &query_embedding, rag::TOP_K)
+        }
+        None => Vec::new(),
+    };
+
+    let texts = {
+        let conn = lock(db)?;
+        let mut texts = Vec::new();
+        for scene_id in scene_ids {
+            if let Some(scene) = repo::get_scene(&conn, &scene_id)?
+                && !scene.content_markdown.trim().is_empty()
+            {
+                texts.push(scene.content_markdown);
+            }
+        }
+        texts
     };
 
     if !settings.keep_loaded {
         *embedder_guard = None;
     }
-    result
+    Ok(texts)
 }
 
 /// Indexa las escenas del proyecto para el chat con contexto (RAG), sin ejecutar

@@ -33,7 +33,7 @@ criterio de aceptación.
 | --- | --- | --- | --- | --- | --- |
 | TD-08 | Varios comandos siguen siendo síncronos y algunos hacen trabajo CPU-bound. | Posibles bloqueos en manuscritos grandes. | P1 | 3d | `spawn_blocking`/worker para análisis, import y export; UI nunca se congela. |
 | TD-09 | La BD es un único `Mutex<Connection>`. | Contención entre autoguardado y análisis. | P1 | 3d | Pool de conexiones o actor de BD con `busy_timeout` y WAL. |
-| TD-10 | `rag::index_project` mantiene el lock durante el embedding. | Autoguardado bloqueado durante la indexación. | P1 | 1d | Separar embed (sin lock) y persistencia (lock corto). |
+| TD-10 | `rag::index_project` mantiene el lock durante el embedding. | Autoguardado bloqueado durante la indexación. | P1 | 1d | ✅ Indexación y consulta RAG separadas del lock; el chat también embebe la query sin lock. |
 | TD-11 | `keep_loaded` no tiene expiración ni botón de descarga. | Modelos ocupan RAM indefinidamente. | P2 | 1d | Idle timeout configurable y acción «Liberar modelos». |
 | TD-12 | `ia_install` carga el modelo de 1 GB solo para descargarlo. | Pico de RAM en equipos modestos. | P1 | 1d | Descarga por streaming sin crear la sesión ONNX. |
 | TD-13 | Descargas de modelos sin progreso, cancelación ni reanudación. | Mala UX y riesgo de corrupción. | P1 | 2d | Job con progreso, cancelación y verificación. |

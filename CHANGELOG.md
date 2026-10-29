@@ -87,6 +87,14 @@ semántico.
   tipo; inspector con «Abrir ficha» y «Aislar entorno»; agrupación por facción.
 - **Presencia derivada** personaje→lugar a partir de `scene.location` y el texto
   (marcada como derivada, con límite de 5 lugares por personaje).
+- **Exportar el grafo** como SVG o PNG con los filtros activos, título,
+  estadísticas y leyenda; diálogo nativo y validación en Rust.
+- **Vista de tabla** accesible de nodos y vínculos, con origen y peso de cada
+  arista.
+- **Navegación por teclado** en el grafo: Tab, Enter/Espacio, Escape,
+  `aria-label` enriquecido y anuncio `aria-live`.
+- **Caché de presencia** invalidada por revisión de escenas (número + última
+  modificación), para no reescanear el manuscrito al abrir el grafo.
 - Duplicar y restaurar proyectos conserva afiliaciones, relaciones y campos.
 
 ### Corregido

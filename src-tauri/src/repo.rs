@@ -2390,14 +2390,58 @@ fn scene_rows(conn: &Connection, project_id: &str) -> Result<Vec<SceneRow>> {
     Ok(rows)
 }
 
-/// Construye el grafo del mundo: personajes, facciones, lugares, relaciones,
-/// afiliaciones y presencia derivada de las escenas.
-pub fn wiki_graph(conn: &Connection, project_id: &str) -> Result<GraphData> {
+/// Presencia derivada y menciones calculadas en un único barrido de escenas.
+/// Se cachea por proyecto y revisión de escenas para no repetir el escaneo.
+#[derive(Debug, Clone, Default)]
+pub struct PresenceSnapshot {
+    pub mentions: HashMap<String, i64>,
+    /// `(character_id, entity_id, escenas)`; ya limitado a los 5 lugares más
+    /// relevantes por personaje.
+    pub presence: Vec<(String, String, i64)>,
+}
+
+/// Revisión barata de todo lo que afecta a la presencia: escenas (contenido,
+/// lugar, POV) y nombres/alias de personajes y entidades. Si cambia, hay que
+/// recalcular la presencia.
+pub fn graph_revision(conn: &Connection, project_id: &str) -> Result<String> {
+    let (scenes, scenes_updated, characters, characters_updated, entities, entities_updated): (
+        i64,
+        String,
+        i64,
+        String,
+        i64,
+        String,
+    ) = conn.query_row(
+        "SELECT
+            (SELECT COUNT(*) FROM scene s JOIN chapter c ON c.id = s.chapter_id
+             WHERE c.project_id = ?1),
+            COALESCE((SELECT MAX(s.updated_at) FROM scene s
+                      JOIN chapter c ON c.id = s.chapter_id
+                      WHERE c.project_id = ?1), ''),
+            (SELECT COUNT(*) FROM character WHERE project_id = ?1),
+            COALESCE((SELECT MAX(updated_at) FROM character WHERE project_id = ?1), ''),
+            (SELECT COUNT(*) FROM entity WHERE project_id = ?1),
+            COALESCE((SELECT MAX(updated_at) FROM entity WHERE project_id = ?1), '')",
+        params![project_id],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        },
+    )?;
+    Ok(format!(
+        "{scenes}:{scenes_updated}:{characters}:{characters_updated}:{entities}:{entities_updated}"
+    ))
+}
+
+pub fn compute_presence(conn: &Connection, project_id: &str) -> Result<PresenceSnapshot> {
     let characters = list_characters(conn, project_id)?;
     let entities = list_entities(conn, project_id)?;
-    let relationships = list_relationships(conn, project_id)?;
-    let affiliations = list_affiliations(conn, project_id)?;
-    let entity_relations = list_entity_relations(conn, project_id)?;
 
     let character_terms: Vec<(String, Vec<String>)> = characters
         .iter()
@@ -2452,6 +2496,44 @@ pub fn wiki_graph(conn: &Connection, project_id: &str) -> Result<GraphData> {
         }
     }
 
+    let mut by_character: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+    for ((character_id, entity_id), count) in presence {
+        by_character
+            .entry(character_id)
+            .or_default()
+            .push((entity_id, count));
+    }
+    let mut presence = Vec::new();
+    for (character_id, mut locations) in by_character {
+        locations.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        locations.truncate(5);
+        for (entity_id, count) in locations {
+            presence.push((character_id.clone(), entity_id, count));
+        }
+    }
+
+    Ok(PresenceSnapshot { mentions, presence })
+}
+
+/// Construye el grafo del mundo: personajes, facciones, lugares, relaciones,
+/// afiliaciones y presencia derivada de las escenas.
+#[allow(dead_code)] // Atajo para tests y consumidores que no usan la caché.
+pub fn wiki_graph(conn: &Connection, project_id: &str) -> Result<GraphData> {
+    let presence = compute_presence(conn, project_id)?;
+    wiki_graph_with_presence(conn, project_id, &presence)
+}
+
+pub fn wiki_graph_with_presence(
+    conn: &Connection,
+    project_id: &str,
+    presence: &PresenceSnapshot,
+) -> Result<GraphData> {
+    let characters = list_characters(conn, project_id)?;
+    let entities = list_entities(conn, project_id)?;
+    let relationships = list_relationships(conn, project_id)?;
+    let affiliations = list_affiliations(conn, project_id)?;
+    let entity_relations = list_entity_relations(conn, project_id)?;
+
     let mut faction_ids: HashMap<String, Vec<String>> = HashMap::new();
     for affiliation in &affiliations {
         if affiliation.entity_type == "faction" {
@@ -2468,7 +2550,7 @@ pub fn wiki_graph(conn: &Connection, project_id: &str) -> Result<GraphData> {
             id: format!("char:{}", character.id),
             kind: "character".into(),
             label: character.name.clone(),
-            mentions: mentions.get(&character.id).copied().unwrap_or(0),
+            mentions: presence.mentions.get(&character.id).copied().unwrap_or(0),
             role: character.role.clone(),
             faction_ids: faction_ids.get(&character.id).cloned().unwrap_or_default(),
         });
@@ -2573,30 +2655,18 @@ pub fn wiki_graph(conn: &Connection, project_id: &str) -> Result<GraphData> {
         });
     }
 
-    // Solo los lugares más presentes de cada personaje para no saturar el mapa.
-    let mut presence_by_character: HashMap<String, Vec<(String, i64)>> = HashMap::new();
-    for ((character_id, entity_id), count) in presence {
-        presence_by_character
-            .entry(character_id)
-            .or_default()
-            .push((entity_id, count));
-    }
-    for (character_id, mut locations) in presence_by_character {
-        locations.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        locations.truncate(5);
-        for (entity_id, count) in locations {
-            edges.push(GraphEdge {
-                id: format!("presence:{character_id}:{entity_id}"),
-                source: format!("char:{character_id}"),
-                target: format!("entity:{entity_id}"),
-                kind: "presence".into(),
-                subtype: None,
-                weight: count as f64,
-                origin: "derived".into(),
-                evidence: None,
-                evidence_scene_id: None,
-            });
-        }
+    for (character_id, entity_id, count) in &presence.presence {
+        edges.push(GraphEdge {
+            id: format!("presence:{character_id}:{entity_id}"),
+            source: format!("char:{character_id}"),
+            target: format!("entity:{entity_id}"),
+            kind: "presence".into(),
+            subtype: None,
+            weight: *count as f64,
+            origin: "derived".into(),
+            evidence: None,
+            evidence_scene_id: None,
+        });
     }
 
     let stats = GraphStats {
@@ -3810,6 +3880,22 @@ mod tests {
             .unwrap();
         assert!(elena_node.mentions >= 1);
         assert_eq!(elena_node.faction_ids, vec![guard.id.clone()]);
+    }
+
+    #[test]
+    fn graph_revision_changes_after_editing() {
+        let conn = crate::db::test_connection();
+        let (project, _chapter, scene) = seed(&conn);
+        let revision = graph_revision(&conn, &project.id).unwrap();
+        assert!(!revision.is_empty());
+
+        conn.execute(
+            "UPDATE scene SET content_markdown = 'otro texto', updated_at = '2030-01-01T00:00:00Z'
+             WHERE id = ?1",
+            params![scene.id],
+        )
+        .unwrap();
+        assert_ne!(revision, graph_revision(&conn, &project.id).unwrap());
     }
 
     #[test]

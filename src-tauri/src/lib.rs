@@ -97,6 +97,7 @@ pub fn run() {
                 let _ = crate::commands::maybe_auto_backup(&conn, &dir);
             }
             app.manage(db);
+            app.manage(commands::GraphCache::new());
             app.manage(crate::engines::ModelCache::new());
 
             // Archivos pasados por línea de comandos (Windows/Linux). En macOS
@@ -146,6 +147,8 @@ pub fn run() {
             commands::move_scene,
             commands::export_project,
             commands::export_project_dialog,
+            commands::export_graph_svg,
+            commands::export_graph_png,
             commands::backup_database,
             commands::persist_image_dialog,
             commands::list_backups,

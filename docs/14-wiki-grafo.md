@@ -224,11 +224,15 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
   salto). No se cambia de pestaña al explorar el grafo.
 - Formas distintas para personaje (círculo), facción (hexágono) y lugar
   (rectángulo), además de color; las aristas usan estilo de línea redundante.
+- **Exportar SVG/PNG** con los filtros activos, título, estadísticas y leyenda.
+- **Vista de tabla** de nodos y vínculos visibles, con las mismas columnas que
+  el inspector y el origen de cada arista.
 - Estado vacío: “Analiza el manuscrito para construir el grafo”.
 - Panel **Vínculos** para crear/editar afiliaciones y relaciones entre
   entidades, revisar sugerencias IA con cita y aceptarlas o descartarlas.
-- Fallback accesible: los nodos son enfocables por teclado y tienen
-  `aria-label`; la pestaña Vínculos ofrece la lista equivalente.
+- Fallback accesible: los nodos son enfocables por teclado, Enter/Espacio
+  selecciona, Escape limpia y `aria-live` anuncia la selección; la vista de
+  tabla y la pestaña Vínculos ofrecen la lista equivalente.
 
 ### 4.3 Rendimiento
 
@@ -320,6 +324,7 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 | `set_entity_relation(...)` / `delete_entity_relation(id)` | Relación manual |
 | `accept_entity_relation(id)` / `reject_entity_relation(id)` | Revisar propuesta IA |
 | `extract_affiliations(project_id, model)` | Detección IA con evidencia |
+| `export_graph_svg(svg)` / `export_graph_png(data)` | Guardar el grafo con diálogo nativo |
 
 ---
 
@@ -371,10 +376,21 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 - **Aceptación:** se ven aristas personaje→facción/lugar y clusters por
   facción; la presencia derivada se distingue de los vínculos manuales. ✔
 
-### Fase 4 — Pulido
+### Fase 4 — Pulido (✅ implementado)
 
-- Exportar grafo (SVG/PNG), accesibilidad, rendimiento, documentación.
-- Timeline/cronología (opcional).
+- **Exportar grafo** como SVG o PNG desde el propio grafo. Se exporta lo que el
+  autor ve (filtros aplicados), con título, estadísticas y leyenda; las rutas se
+  eligen con diálogo nativo en Rust y se validan extensión y firma del archivo.
+- **Vista de tabla** accesible con nodos y vínculos visibles: nombre, tipo, rol,
+  menciones, vínculos, facciones, origen y peso.
+- **Teclado y lectores de pantalla:** nodos enfocables, Enter/Espacio para
+  seleccionar, Escape para limpiar, `aria-label` con tipo/rol/menciones y aviso
+  `aria-live` de la selección.
+- **Caché de presencia:** se invalida con una revisión barata de escenas
+  (número + última modificación), evitando reescanear el manuscrito en cada
+  apertura del grafo.
+- **Pendiente:** detección IA de relaciones entre entidades (TD-58) y
+  timeline/cronología opcional.
 
 ---
 

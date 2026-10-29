@@ -37,6 +37,45 @@ fn lock_model<T>(m: &std::sync::Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>
         .map_err(|_| AppError::Internal("estado de modelos corrupto".into()))
 }
 
+/// Caché en proceso de la presencia derivada del grafo. La clave incluye la
+/// revisión de escenas para invalidarla automáticamente al editar el manuscrito.
+#[derive(Default)]
+pub struct GraphCache {
+    entries: std::sync::Mutex<HashMap<String, (String, repo::PresenceSnapshot)>>,
+}
+
+impl GraphCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn get(&self, project_id: &str, revision: &str) -> Option<repo::PresenceSnapshot> {
+        let entries = self.entries.lock().ok()?;
+        entries
+            .get(project_id)
+            .filter(|(cached, _)| cached == revision)
+            .map(|(_, presence)| presence.clone())
+    }
+
+    fn put(
+        &self,
+        project_id: &str,
+        revision: String,
+        presence: &repo::PresenceSnapshot,
+    ) -> Result<()> {
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| AppError::Internal("caché del grafo corrupta".into()))?;
+        // Mantener solo un puñado de proyectos abiertos.
+        if entries.len() >= 8 && !entries.contains_key(project_id) {
+            entries.clear();
+        }
+        entries.insert(project_id.to_string(), (revision, presence.clone()));
+        Ok(())
+    }
+}
+
 /// Valida una ruta de importación: extensión permitida y tamaño máximo.
 ///
 /// Sin esta comprobación, un renderer comprometido podría usar `import_file`
@@ -111,6 +150,8 @@ fn validate_export_path(path: &std::path::Path, format: &str) -> Result<()> {
         "docx" => &["docx"],
         "pdf" => &["pdf"],
         "epub" => &["epub"],
+        "svg" => &["svg"],
+        "png" => &["png"],
         _ => {
             return Err(AppError::Validation(format!(
                 "formato desconocido: {format}"
@@ -806,6 +847,63 @@ pub fn export_project_dialog(
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
+/// Exporta el grafo como SVG. El renderer genera el markup (ya filtrado por el
+/// autor) y Rust solo valida y escribe en la ruta elegida con diálogo nativo.
+#[tauri::command]
+pub fn export_graph_svg(app: tauri::AppHandle, svg: String) -> Result<Option<String>> {
+    const MAX_BYTES: usize = 10 * 1024 * 1024;
+    if svg.len() > MAX_BYTES {
+        return Err(AppError::Validation(
+            "el SVG del grafo es demasiado grande".into(),
+        ));
+    }
+    if !svg.trim_start().starts_with("<?xml") && !svg.trim_start().starts_with("<svg") {
+        return Err(AppError::Validation(
+            "el contenido no parece un SVG válido".into(),
+        ));
+    }
+    let Some(path) = pick_save_file(&app, "Exportar grafo", "grafo.svg", "SVG", "svg")? else {
+        return Ok(None);
+    };
+    validate_export_path(&path, "svg")?;
+    std::fs::write(&path, svg)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Exporta el grafo como PNG. Acepta un data URL (`data:image/png;base64,…`)
+/// o base64 puro, valida la firma PNG y escribe el archivo.
+#[tauri::command]
+pub fn export_graph_png(app: tauri::AppHandle, data: String) -> Result<Option<String>> {
+    use base64::Engine as _;
+
+    const MAX_BYTES: usize = 40 * 1024 * 1024;
+    let raw = data
+        .split_once(',')
+        .map(|(_, payload)| payload)
+        .unwrap_or(data.as_str())
+        .trim();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw)
+        .map_err(|e| AppError::Validation(format!("PNG en base64 inválido: {e}")))?;
+    if bytes.len() > MAX_BYTES {
+        return Err(AppError::Validation(
+            "el PNG del grafo es demasiado grande".into(),
+        ));
+    }
+    const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if !bytes.starts_with(PNG_SIGNATURE) {
+        return Err(AppError::Validation(
+            "el contenido no parece un PNG válido".into(),
+        ));
+    }
+    let Some(path) = pick_save_file(&app, "Exportar grafo", "grafo.png", "PNG", "png")? else {
+        return Ok(None);
+    };
+    validate_export_path(&path, "png")?;
+    std::fs::write(&path, bytes)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 // ---------------------------------------------------------------------------
 // Personajes y relaciones (IA local)
 // ---------------------------------------------------------------------------
@@ -1269,9 +1367,22 @@ pub fn reject_field_suggestion(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn wiki_graph(db: State<'_, Db>, project_id: String) -> Result<GraphData> {
+pub fn wiki_graph(
+    db: State<'_, Db>,
+    cache: State<'_, GraphCache>,
+    project_id: String,
+) -> Result<GraphData> {
     let conn = lock(&db)?;
-    repo::wiki_graph(&conn, &project_id)
+    let revision = repo::graph_revision(&conn, &project_id)?;
+    let presence = match cache.get(&project_id, &revision) {
+        Some(presence) => presence,
+        None => {
+            let presence = repo::compute_presence(&conn, &project_id)?;
+            cache.put(&project_id, revision, &presence)?;
+            presence
+        }
+    };
+    repo::wiki_graph_with_presence(&conn, &project_id, &presence)
 }
 
 #[tauri::command]

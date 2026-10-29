@@ -91,7 +91,11 @@ Abre **Mundo** en la barra superior.
    facciones, lugares y tipo de vínculo; activa **Agrupar por facción**; haz clic
    en un nodo para ver su inspector y usa **Aislar entorno** para ver solo su
    vecindario. Arrastra, haz zoom/pan y abre la ficha desde el inspector.
-7. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
+7. Desde la barra del grafo puedes **exportar SVG o PNG** (se exporta lo que
+   ves, con filtros aplicados) o cambiar a **Ver tabla** para leer nodos y
+   vínculos. Con el teclado: Tab para recorrer nodos, Enter/Espacio para
+   seleccionar y Escape para limpiar.
+8. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
 
 El análisis es **no destructivo**: analizar un capítulo no borra los personajes
 de los anteriores. Las fichas que edites a mano se conservan.

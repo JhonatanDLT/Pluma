@@ -79,6 +79,9 @@
   let data = $state<GraphData | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let exporting = $state(false);
+  let exportMessage = $state<string | null>(null);
+  let showTable = $state(false);
   let loadToken = 0;
 
   let rawNodes: GNode[] = [];
@@ -150,6 +153,16 @@
   });
 
   const stats = $derived(data?.stats ?? null);
+
+  const nodeLabels = $derived(
+    new Map((data?.nodes ?? []).map((node) => [node.id, node.label])),
+  );
+
+  const statsText = $derived(
+    stats
+      ? `${stats.characters} personajes · ${stats.factions} facciones · ${stats.locations} lugares · ${stats.relationships + stats.affiliations + stats.presence + stats.entity_relations} vínculos`
+      : "",
+  );
 
   function edgeGroup(kind: GraphEdgeKind): keyof typeof showEdges {
     if (kind === "relationship") return "relationships";
@@ -452,6 +465,203 @@
   function detailLabel(kind: GraphNodeKind): string {
     return kind === "character" ? "Personaje" : kind === "faction" ? "Facción" : "Lugar";
   }
+
+  function edgeKindLabel(kind: GraphEdgeKind): string {
+    return (
+      {
+        relationship: "Relación",
+        affiliation: "Afiliación",
+        presence: "Presencia",
+        territory: "Territorio",
+        alliance: "Alianza",
+        conflict: "Conflicto",
+      }[kind] ?? kind
+    );
+  }
+
+  function cssVar(name: string, fallback: string): string {
+    const value = getComputedStyle(document.documentElement)
+      .getPropertyValue(name)
+      .trim();
+    return value || fallback;
+  }
+
+  function escapeXml(value: string): string {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&apos;");
+  }
+
+  interface SvgPalette {
+    muted: string;
+    border: string;
+    accent: string;
+    danger: string;
+  }
+
+  function svgEdgeStyle(
+    kind: GraphEdgeKind,
+    palette: SvgPalette,
+  ): { stroke: string; dash: string; opacity: number } {
+    switch (kind) {
+      case "affiliation":
+        return { stroke: palette.accent, dash: "5 3", opacity: 0.75 };
+      case "presence":
+        return { stroke: palette.muted, dash: "2 5", opacity: 0.45 };
+      case "territory":
+        return { stroke: palette.muted, dash: "8 4", opacity: 0.7 };
+      case "alliance":
+        return { stroke: "#4f9d69", dash: "", opacity: 0.85 };
+      case "conflict":
+        return { stroke: palette.danger, dash: "4 3", opacity: 0.85 };
+      default:
+        return { stroke: palette.border, dash: "", opacity: 0.7 };
+    }
+  }
+
+  function buildSvgMarkup(): string {
+    if (visibleNodes.length === 0) return "";
+    const pad = 40;
+    const top = 62;
+    const bottom = 46;
+    const minX = Math.min(...visibleNodes.map((n) => n.x - n.radius));
+    const maxX = Math.max(...visibleNodes.map((n) => n.x + n.radius));
+    const minY = Math.min(...visibleNodes.map((n) => n.y - n.radius));
+    const maxY = Math.max(...visibleNodes.map((n) => n.y + n.radius));
+    const width = Math.ceil(Math.max(640, maxX - minX + pad * 2));
+    const height = Math.ceil(Math.max(360, maxY - minY + top + bottom));
+    const offsetX = pad - minX;
+    const offsetY = top - minY;
+
+    const bg = cssVar("--bg", "#f6f4f0");
+    const text = cssVar("--text", "#2a2723");
+    const muted = cssVar("--text-muted", "#8a8178");
+    const accent = cssVar("--accent", "#a4552c");
+    const border = cssVar("--border-strong", "#c9c1b5");
+    const palette: SvgPalette = {
+      muted,
+      border,
+      accent,
+      danger: cssVar("--danger", "#d64545"),
+    };
+
+    const parts: string[] = [
+      `<?xml version="1.0" encoding="UTF-8"?>`,
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+      `<rect width="${width}" height="${height}" fill="${bg}"/>`,
+      `<text x="${pad}" y="30" font-family="Georgia, serif" font-size="18" fill="${text}">Grafo del mundo · Pluma</text>`,
+      `<text x="${pad}" y="48" font-family="system-ui, sans-serif" font-size="11" fill="${muted}">${escapeXml(statsText)}</text>`,
+      `<g transform="translate(${offsetX.toFixed(2)},${offsetY.toFixed(2)})">`,
+    ];
+
+    for (const link of visibleLinks) {
+      const style = svgEdgeStyle(link.kind, palette);
+      const opacity = link.origin === "ai" ? style.opacity * 0.7 : link.origin === "derived" ? style.opacity * 0.8 : style.opacity;
+      const dash = style.dash ? ` stroke-dasharray="${style.dash}"` : "";
+      parts.push(
+        `<line x1="${link.x1.toFixed(2)}" y1="${link.y1.toFixed(2)}" x2="${link.x2.toFixed(2)}" y2="${link.y2.toFixed(2)}" stroke="${style.stroke}" stroke-width="${(1 + Math.min(3, link.weight / 4)).toFixed(1)}" stroke-opacity="${opacity.toFixed(2)}"${dash}/>`,
+      );
+    }
+
+    for (const node of visibleNodes) {
+      const fill =
+        node.kind === "character"
+          ? node.factionId
+            ? factionColor(node.factionId)
+            : muted
+          : node.kind === "faction"
+            ? factionColor(node.id)
+            : border;
+      const stroke = node.protagonist ? accent : bg;
+      const strokeWidth = node.protagonist ? 2.5 : 2;
+      const transform = `translate(${node.x.toFixed(2)},${node.y.toFixed(2)})`;
+      const shape =
+        node.kind === "character"
+          ? `<circle r="${node.radius}" fill="${fill}" fill-opacity="0.9" stroke="${stroke}" stroke-width="${strokeWidth}"/>`
+          : node.kind === "faction"
+            ? `<polygon points="${hexagon(node.radius)}" fill="${fill}" fill-opacity="0.9" stroke="${stroke}" stroke-width="${strokeWidth}"/>`
+            : `<rect x="${-node.radius}" y="${-node.radius * 0.75}" width="${node.radius * 2}" height="${node.radius * 1.5}" rx="3" fill="${fill}" fill-opacity="0.9" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
+      parts.push(`<g transform="${transform}">${shape}`);
+      if (showLabels) {
+        parts.push(
+          `<text y="${node.radius + 14}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="${text}" paint-order="stroke" stroke="${bg}" stroke-width="3" stroke-linejoin="round">${escapeXml(node.label)}</text>`,
+        );
+      }
+      parts.push(`</g>`);
+    }
+
+    parts.push(`</g>`);
+    const legendY = height - 20;
+    parts.push(
+      `<g font-family="system-ui, sans-serif" font-size="10" fill="${muted}">`,
+      `<circle cx="${pad + 4}" cy="${legendY - 3}" r="4" fill="${muted}"/><text x="${pad + 12}" y="${legendY}">personaje</text>`,
+      `<polygon points="${hexagon(5).split(" ").map((p) => { const [x, y] = p.split(",").map(Number); return `${pad + 94 + x},${legendY - 3 + y}`; }).join(" ")}" fill="${accent}"/><text x="${pad + 106}" y="${legendY}">facción</text>`,
+      `<rect x="${pad + 168}" y="${legendY - 7}" width="9" height="9" rx="2" fill="${border}"/><text x="${pad + 182}" y="${legendY}">lugar</text>`,
+      `<line x1="${pad + 228}" y1="${legendY - 3}" x2="${pad + 246}" y2="${legendY - 3}" stroke="${border}" stroke-width="1.5"/><text x="${pad + 252}" y="${legendY}">relación</text>`,
+      `<line x1="${pad + 312}" y1="${legendY - 3}" x2="${pad + 330}" y2="${legendY - 3}" stroke="${accent}" stroke-width="1.5" stroke-dasharray="5 3"/><text x="${pad + 336}" y="${legendY}">afiliación</text>`,
+      `<line x1="${pad + 402}" y1="${legendY - 3}" x2="${pad + 420}" y2="${legendY - 3}" stroke="${muted}" stroke-width="1.5" stroke-dasharray="2 5"/><text x="${pad + 426}" y="${legendY}">presencia</text>`,
+      `</g>`,
+    );
+    parts.push(`</svg>`);
+    return parts.join("\n");
+  }
+
+  async function exportSvg() {
+    exporting = true;
+    exportMessage = null;
+    try {
+      const markup = buildSvgMarkup();
+      if (!markup) return;
+      const path = await api.exportGraphSvg(markup);
+      if (path) exportMessage = `Grafo exportado: ${path}`;
+    } catch (e) {
+      exportMessage = String(e);
+    } finally {
+      exporting = false;
+    }
+  }
+
+  async function exportPng() {
+    exporting = true;
+    exportMessage = null;
+    try {
+      const markup = buildSvgMarkup();
+      if (!markup) return;
+      const blob = new Blob([markup], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      try {
+        const image = new Image();
+        await new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve();
+          image.onerror = () => reject(new Error("No se pudo rasterizar el grafo."));
+          image.src = url;
+        });
+        const baseWidth = Math.max(1, image.naturalWidth || image.width);
+        const baseHeight = Math.max(1, image.naturalHeight || image.height);
+        // Suficiente resolución sin desbordar memoria en grafos grandes.
+        const scale = Math.min(2, 4096 / Math.max(baseWidth, baseHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(baseWidth * scale));
+        canvas.height = Math.max(1, Math.round(baseHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("No se pudo crear el lienzo PNG.");
+        context.scale(scale, scale);
+        context.drawImage(image, 0, 0);
+        const data = canvas.toDataURL("image/png");
+        const path = await api.exportGraphPng(data);
+        if (path) exportMessage = `Grafo exportado: ${path}`;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      exportMessage = String(e);
+    } finally {
+      exporting = false;
+    }
+  }
 </script>
 
 <div class="world-graph">
@@ -474,6 +684,21 @@
       </label>
     </div>
     <button class="btn" onclick={resetView}>Centrar</button>
+    <button
+      class="btn"
+      onclick={exportSvg}
+      disabled={exporting || visibleNodes.length === 0}
+      title="Exportar el grafo visible como SVG"
+    >SVG</button>
+    <button
+      class="btn"
+      onclick={exportPng}
+      disabled={exporting || visibleNodes.length === 0}
+      title="Exportar el grafo visible como PNG"
+    >PNG</button>
+    <button class="btn" onclick={() => (showTable = !showTable)}>
+      {showTable ? "Ver grafo" : "Ver tabla"}
+    </button>
     <label class="graph-toggle">
       <input type="checkbox" bind:checked={cluster} /> Agrupar por facción
     </label>
@@ -484,6 +709,10 @@
       <button class="btn" onclick={clearFocus}>Ver todo</button>
     {/if}
   </div>
+
+  {#if exportMessage}
+    <p class="graph-export-msg" role="status">{exportMessage}</p>
+  {/if}
 
   <div class="graph-toolbar graph-toolbar-secondary">
     <span class="graph-filter-title">Aristas:</span>
@@ -500,12 +729,7 @@
       <input type="checkbox" bind:checked={showEdges.entities} /> Alianzas y territorio
     </label>
     <span class="graph-stats">
-      {#if stats}
-        {stats.characters} personajes · {stats.factions} facciones · {stats.locations} lugares ·
-        {stats.relationships + stats.affiliations + stats.presence + stats.entity_relations} vínculos
-      {:else}
-        Cargando…
-      {/if}
+      {statsText || "Cargando…"}
     </span>
   </div>
 
@@ -518,6 +742,73 @@
       <p>Analiza el manuscrito para construir el grafo de personajes, facciones y lugares.</p>
     </div>
   {:else}
+    <p class="sr-only" aria-live="polite">
+      {selected
+        ? `${selected.label}, ${detailLabel(selected.kind)}, ${selected.degree} vínculos`
+        : "Ningún nodo seleccionado"}
+    </p>
+
+    {#if showTable}
+      <div class="graph-table">
+        <table>
+          <caption>Nodos visibles ({visibleNodes.length})</caption>
+          <thead>
+            <tr>
+              <th scope="col">Nombre</th>
+              <th scope="col">Tipo</th>
+              <th scope="col">Rol</th>
+              <th scope="col">Menciones</th>
+              <th scope="col">Vínculos</th>
+              <th scope="col">Facciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleNodes as node (node.id)}
+              <tr>
+                <td>{node.label}</td>
+                <td>{detailLabel(node.kind)}</td>
+                <td>{node.role ?? "—"}</td>
+                <td>{node.mentions}</td>
+                <td>{node.degree}</td>
+                <td>{node.factionLabels.join(", ") || "—"}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+
+        <table>
+          <caption>Vínculos visibles ({visibleLinks.length})</caption>
+          <thead>
+            <tr>
+              <th scope="col">Desde</th>
+              <th scope="col">Hasta</th>
+              <th scope="col">Tipo</th>
+              <th scope="col">Detalle</th>
+              <th scope="col">Peso</th>
+              <th scope="col">Origen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleLinks as link (link.id)}
+              <tr>
+                <td>{nodeLabels.get(link.sourceId) ?? link.sourceId}</td>
+                <td>{nodeLabels.get(link.targetId) ?? link.targetId}</td>
+                <td>{edgeKindLabel(link.kind)}</td>
+                <td>{link.subtype ?? "—"}</td>
+                <td>{link.weight}</td>
+                <td>
+                  {link.origin === "derived"
+                    ? "derivado"
+                    : link.origin === "ai"
+                      ? "IA"
+                      : "manual"}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {:else}
     <div class="graph-main">
       <div class="graph-canvas">
         <svg
@@ -563,11 +854,14 @@
                 onclick={() => selectNode(node)}
                 role="button"
                 tabindex="0"
-                aria-label={`${node.label}, ${detailLabel(node.kind)}`}
+                aria-label={`${node.label}, ${detailLabel(node.kind)}${node.role ? `, ${node.role}` : ""}, ${node.mentions} menciones, ${node.degree} vínculos`}
                 onkeydown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     selectNode(node);
+                  } else if (e.key === "Escape") {
+                    selected = null;
+                    focusId = null;
                   }
                 }}
               >
@@ -639,6 +933,7 @@
         </aside>
       {/if}
     </div>
+    {/if}
 
     <div class="graph-legend">
       <span><i class="mark char"></i>personaje</span>
@@ -724,6 +1019,74 @@
     min-height: 380px;
     display: flex;
     gap: 10px;
+  }
+
+  .graph-table {
+    flex: 1;
+    min-height: 380px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    padding: 12px;
+  }
+
+  .graph-table table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12px;
+  }
+
+  .graph-table caption {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    padding-bottom: 6px;
+  }
+
+  .graph-table th,
+  .graph-table td {
+    text-align: left;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .graph-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .graph-table tbody tr:hover {
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  .graph-export-msg {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .graph-canvas {

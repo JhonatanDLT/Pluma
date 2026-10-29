@@ -311,6 +311,12 @@ export const deleteEntityRelation = (id: string) =>
   invoke<void>("delete_entity_relation", { id });
 export const extractAffiliations = (projectId: string, model: string | null = null) =>
   invoke<WorldLinkReport>("extract_affiliations", { projectId, model });
+
+// Exportación del grafo (el diálogo nativo se abre en Rust)
+export const exportGraphSvg = (svg: string) =>
+  invoke<string | null>("export_graph_svg", { svg });
+export const exportGraphPng = (data: string) =>
+  invoke<string | null>("export_graph_png", { data });
 export const correctText = (text: string, model: string | null) =>
   invoke<string>("correct_text", { text, model });
 export const chat = (message: string, model: string | null, projectId: string | null) =>

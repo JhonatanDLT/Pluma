@@ -105,6 +105,7 @@ con CI multiplataforma y checklist de firma/notarización.
   inspector y agrupación por facción.
 - **Vínculos y sugerencias IA:** asigna personajes a facciones/lugares y revisa
   las propuestas con cita textual; lo manual nunca se sobrescribe.
+- **Exporta el grafo** a SVG/PNG y consúltalo en una vista de tabla accesible.
 - **Campos propios de la biblia** con sugerencias de IA que citan el manuscrito
   y se aceptan o descartan por campo.
 - **Modo foco** (`Ctrl/Cmd+Shift+F`) para escribir sin distracciones.

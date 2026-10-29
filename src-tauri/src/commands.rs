@@ -882,6 +882,11 @@ pub fn export_graph_png(app: tauri::AppHandle, data: String) -> Result<Option<St
         .map(|(_, payload)| payload)
         .unwrap_or(data.as_str())
         .trim();
+    if raw.len() > MAX_BYTES * 2 {
+        return Err(AppError::Validation(
+            "el PNG del grafo es demasiado grande".into(),
+        ));
+    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(raw)
         .map_err(|e| AppError::Validation(format!("PNG en base64 inválido: {e}")))?;

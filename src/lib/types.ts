@@ -131,6 +131,94 @@ export interface NavEntry {
   scene_title: string | null;
 }
 
+export interface Affiliation {
+  id: string;
+  project_id: string;
+  character_id: string;
+  character_name: string;
+  entity_id: string;
+  entity_name: string;
+  entity_type: string;
+  role: string;
+  source: "manual" | "ai";
+  confidence: number | null;
+  evidence: string | null;
+  evidence_scene_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EntityRelation {
+  id: string;
+  project_id: string;
+  a_entity_id: string;
+  a_name: string;
+  a_type: string;
+  b_entity_id: string;
+  b_name: string;
+  b_type: string;
+  kind: "alliance" | "conflict" | "territory";
+  source: "manual" | "ai";
+  confidence: number | null;
+  evidence: string | null;
+  evidence_scene_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type GraphNodeKind = "character" | "faction" | "location";
+export type GraphEdgeKind =
+  | "relationship"
+  | "affiliation"
+  | "presence"
+  | "territory"
+  | "alliance"
+  | "conflict";
+
+export interface GraphNode {
+  id: string;
+  kind: GraphNodeKind;
+  label: string;
+  mentions: number;
+  role: string | null;
+  faction_ids: string[];
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: GraphEdgeKind;
+  subtype: string | null;
+  weight: number;
+  origin: "manual" | "ai" | "derived";
+  evidence: string | null;
+  evidence_scene_id: string | null;
+}
+
+export interface GraphStats {
+  characters: number;
+  factions: number;
+  locations: number;
+  relationships: number;
+  affiliations: number;
+  presence: number;
+  entity_relations: number;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  stats: GraphStats;
+}
+
+export interface WorldLinkReport {
+  characters: number;
+  proposed: number;
+  skipped: number;
+  insufficient: number;
+}
+
 export interface Entity {
   id: string;
   project_id: string;

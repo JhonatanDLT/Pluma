@@ -100,8 +100,11 @@ con CI multiplataforma y checklist de firma/notarización.
 - **Buscar y reemplazar** en el editor (`Ctrl/Cmd+F`).
 - **Búsqueda full-text** en toda la novela (`Ctrl/Cmd+Shift+P`) con SQLite FTS5,
   ranking por relevancia y salto directo a la escena.
-- **Grafo de relaciones** en World Building: mapa force-directed de personajes,
-  búsqueda, zoom/pan y clic para abrir la ficha.
+- **Grafo del mundo** en World Building: personajes, facciones, lugares,
+  afiliaciones, alianzas y presencia derivada; filtros, búsqueda, zoom/pan,
+  inspector y agrupación por facción.
+- **Vínculos y sugerencias IA:** asigna personajes a facciones/lugares y revisa
+  las propuestas con cita textual; lo manual nunca se sobrescribe.
 - **Campos propios de la biblia** con sugerencias de IA que citan el manuscrito
   y se aceptan o descartan por campo.
 - **Modo foco** (`Ctrl/Cmd+Shift+F`) para escribir sin distracciones.

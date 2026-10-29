@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0009_embeddings.sql"),
     include_str!("../migrations/0010_fts.sql"),
     include_str!("../migrations/0011_character_fields.sql"),
+    include_str!("../migrations/0012_wiki_graph.sql"),
 ];
 
 /// Máximo de conexiones reutilizables. SQLite en WAL permite lectores
@@ -215,6 +216,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fields, 9);
+        let new_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'
+                 AND name IN ('character_affiliation', 'entity_relation')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_tables, 2);
 
         drop(conn);
         drop(db);

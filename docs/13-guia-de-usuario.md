@@ -84,9 +84,14 @@ Abre **Mundo** en la barra superior.
 4. Abre la pestaña **Campos** para añadir campos propios («Color de ojos»,
    «Herida», «Objeto simbólico»…) con su tipo y, opcionalmente, un indicio para
    la IA. Estos campos también reciben sugerencias con evidencia.
-5. Abre la pestaña **Grafo** para ver el mapa de relaciones: arrastra nodos,
-   haz zoom/pan, busca un personaje y haz clic para abrir su ficha.
-6. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
+5. Abre la pestaña **Vínculos** para asignar personajes a facciones o lugares,
+   crear alianzas/conflictos/territorios y revisar las afiliaciones que propone
+   la IA (con cita textual). Las propuestas IA se aceptan o descartan una a una.
+6. Abre la pestaña **Grafo** para ver el mapa del mundo: filtra por personajes,
+   facciones, lugares y tipo de vínculo; activa **Agrupar por facción**; haz clic
+   en un nodo para ver su inspector y usa **Aislar entorno** para ver solo su
+   vecindario. Arrastra, haz zoom/pan y abre la ficha desde el inspector.
+7. Usa la pestaña **Registro** para ver qué cambió en cada análisis.
 
 El análisis es **no destructivo**: analizar un capítulo no borra los personajes
 de los anteriores. Las fichas que edites a mano se conservan.

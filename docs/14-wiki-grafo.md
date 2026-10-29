@@ -111,30 +111,58 @@ Reglas:
 
 ```sql
 CREATE TABLE character_affiliation (
-    character_id TEXT NOT NULL REFERENCES character(id) ON DELETE CASCADE,
-    entity_id    TEXT NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
-    role         TEXT,                      -- member | leader | ally | rival
-    source       TEXT NOT NULL DEFAULT 'manual',
-    confidence   REAL,
-    evidence     TEXT,
-    PRIMARY KEY (character_id, entity_id, role)
+    id                TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    character_id      TEXT NOT NULL,
+    entity_id         TEXT NOT NULL,
+    role              TEXT NOT NULL,   -- facción: leader|member|ally|rival
+                                       -- lugar: resident|origin|visitor
+    source            TEXT NOT NULL DEFAULT 'manual', -- manual | ai
+    confidence        REAL,
+    evidence          TEXT,
+    evidence_scene_id TEXT REFERENCES scene(id) ON DELETE SET NULL,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    UNIQUE (character_id, entity_id),
+    FOREIGN KEY (project_id, character_id) REFERENCES character(project_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id, entity_id)    REFERENCES entity(project_id, id)    ON DELETE CASCADE
 );
 
 CREATE TABLE entity_relation (
-    a_entity_id TEXT NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
-    b_entity_id TEXT NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
-    kind        TEXT,                       -- territory | alliance | conflict
-    source      TEXT NOT NULL DEFAULT 'manual',
-    confidence  REAL,
-    evidence    TEXT,
-    PRIMARY KEY (a_entity_id, b_entity_id, kind)
+    id                TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    a_entity_id       TEXT NOT NULL,
+    b_entity_id       TEXT NOT NULL,
+    kind              TEXT NOT NULL,   -- alliance | conflict | territory
+    source            TEXT NOT NULL DEFAULT 'manual',
+    confidence        REAL,
+    evidence          TEXT,
+    evidence_scene_id TEXT REFERENCES scene(id) ON DELETE SET NULL,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    CHECK (a_entity_id <> b_entity_id),
+    CHECK (kind = 'territory' OR a_entity_id < b_entity_id),
+    UNIQUE (a_entity_id, b_entity_id, kind),
+    FOREIGN KEY (project_id, a_entity_id) REFERENCES entity(project_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id, b_entity_id) REFERENCES entity(project_id, id) ON DELETE CASCADE
 );
 ```
 
-- `character_affiliation` une personaje → facción/lugar (según `entity_type`).
-- `entity_relation` une facción ↔ lugar (territorio) o facción ↔ facción.
-- Las relaciones personaje-personaje siguen en `relationship`; se puede usar
-  `source_evidence_json` (ya existe) para evidencia/confianza.
+- Un personaje tiene **un solo rol por entidad**; el rol depende del tipo:
+  facción (`leader`, `member`, `ally`, `rival`) o lugar (`resident`, `origin`,
+  `visitor`). Se valida en Rust.
+- `alliance` y `conflict` son simétricos: se guardan con `a_entity_id <
+  b_entity_id` y un índice parcial impide que la misma pareja sea aliada y
+  enemiga.
+- `territory` es direccional: facción → lugar.
+- `manual` nunca se sobrescribe desde la IA; las propuestas quedan como `ai`
+  hasta que el autor las acepta o descarta.
+- Las relaciones personaje-personaje siguen en `relationship`.
+- **Presencia** personaje → lugar es derivada: se calcula desde
+  `scene.location` (y el texto como respaldo), no se persiste. Es una señal de
+  coocurrencia, no una afirmación de residencia.
+- Las IDs de nodo van con prefijo (`char:` / `entity:`) porque los espacios de
+  IDs de personajes y entidades son independientes.
 
 ---
 
@@ -146,50 +174,61 @@ Comando `wiki_graph(project_id)`:
 
 ```ts
 type GraphNode = {
-  id: string;
+  id: string;                 // char:<id> | entity:<id>
   kind: "character" | "faction" | "location";
   label: string;
   mentions: number;
-  role?: string | null;
-  factionId?: string | null;
-  locationId?: string | null;
+  role: string | null;
+  faction_ids: string[];      // facciones a las que pertenece
 };
 
 type GraphEdge = {
   id: string;
   source: string;
   target: string;
-  kind: "relationship" | "affiliation" | "presence" | "territory";
-  subtype?: string | null;   // mentor, rival, ally…
-  weight: number;            // intensidad / coocurrencias
-  evidence?: string | null;
+  kind: "relationship" | "affiliation" | "presence"
+      | "territory" | "alliance" | "conflict";
+  subtype: string | null;     // tipo de relación o rol de afiliación
+  weight: number;             // intensidad / coocurrencias
+  origin: "manual" | "ai" | "derived";
+  evidence: string | null;
+  evidence_scene_id: string | null;
 };
 
 type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 ```
 
 - **Personajes:** tamaño por menciones; color por facción; borde por rol.
-- **Facciones/lugares:** nodos más grandes, color propio.
+- **Facciones/lugares:** nodos más grandes (forma distinta), color propio.
 - **Aristas:**
   - `relationship`: personaje ↔ personaje (grosor por intensidad).
-  - `affiliation`: personaje → facción (rol: líder, miembro, aliado, rival).
-  - `presence`: personaje → lugar (si hay evidencia en escenas o IA).
+  - `affiliation`: personaje → facción/lugar (rol: líder, miembro, aliado,
+    rival, residente, origen, visitante).
+  - `presence`: personaje → lugar **derivado** de las escenas (hasta 5 lugares
+    por personaje).
   - `territory`: facción → lugar.
+  - `alliance` / `conflict`: facción ↔ facción.
+- Cada arista conserva `origin` y, cuando existe, la cita y la escena de
+  evidencia.
 
 ### 4.2 UI (`WorldGraph.svelte`)
 
-- Simulación **force-directed** con `d3-force` + SVG (o canvas si hay > 250
-  nodos).
-- Zoom/pan, arrastrar nodos, etiquetas al hacer hover, búsqueda.
-- Filtros:
-  - por facción, lugar, tipo de relación y rol;
-  - “solo el entorno de este personaje” (ego network) al doble clic;
-  - “ocultar lugares” / “ocultar facciones” para reducir ruido.
-- Clic en nodo → abre la ficha existente en el panel de detalle.
-- Botón “Agrupar por facción”: layout con clusters alrededor del nodo facción.
+- Simulación **force-directed** con `d3-force` + SVG.
+- Zoom/pan, arrastrar nodos, etiquetas y búsqueda que atenúa.
+- Filtros por tipo de nodo (personajes, facciones, lugares) y por tipo de
+  arista (relaciones, afiliaciones, presencia, alianzas/territorio).
+- **Agrupar por facción:** una fuerza extra acerca a cada personaje hacia su
+  facción principal.
+- **Inspector:** al hacer clic en un nodo se muestra su tipo, rol, menciones,
+  vínculos y facciones, con «Abrir ficha» y «Aislar entorno» (ego network de un
+  salto). No se cambia de pestaña al explorar el grafo.
+- Formas distintas para personaje (círculo), facción (hexágono) y lugar
+  (rectángulo), además de color; las aristas usan estilo de línea redundante.
 - Estado vacío: “Analiza el manuscrito para construir el grafo”.
-- Fallback accesible: lista de relaciones y tabla de nodos para lectores de
-  pantalla.
+- Panel **Vínculos** para crear/editar afiliaciones y relaciones entre
+  entidades, revisar sugerencias IA con cita y aceptarlas o descartarlas.
+- Fallback accesible: los nodos son enfocables por teclado y tienen
+  `aria-label`; la pestaña Vínculos ofrece la lista equivalente.
 
 ### 4.3 Rendimiento
 
@@ -230,7 +269,20 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 - Las reglas pueden rellenar alias/rol básico.
 - La UI explica por qué un campo está vacío; no se inventa una biografía.
 
-### 5.3 Campos personalizados
+### 5.3 Afiliaciones con IA
+
+- `extract_affiliations` recorre los personajes con contexto suficiente.
+- El prompt recibe listas cerradas de facciones y lugares; el modelo debe
+  elegir solo de esas listas y citar evidencia.
+- El nombre propuesto se resuelve contra nombre/alias normalizados; si no
+  existe, se descarta (nunca se crean entidades automáticamente).
+- El rol se valida contra el tipo de entidad y la cita contra el contexto; la
+  escena que contiene la cita se guarda como `evidence_scene_id`.
+- Las propuestas se guardan con `source = ai`. Al re-detectar se borran solo las
+  sugerencias IA anteriores del personaje; las manuales nunca se tocan.
+- La revisión (Aceptar / Descartar) está en la pestaña **Vínculos**.
+
+### 5.4 Campos personalizados
 
 - El autor crea “Color de ojos” con hint “solo si se menciona explícitamente”.
 - El prompt incluye ese campo; el LLM lo rellena solo si encuentra una cita.
@@ -238,7 +290,7 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 - Los campos built-in se pueden ocultar o renombrar en la UI, pero su `key`
   interna no cambia.
 
-### 5.4 Modelo
+### 5.5 Modelo
 
 - Local: Qwen 1.5B/4B en modo JSON.
 - Nube: opcional, con consentimiento; mismo esquema.
@@ -260,9 +312,14 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 | `reject_field_suggestion(character_id, field_id)` | Descarta una propuesta |
 | `enrich_character_fields(project_id, character_id, model)` | Sugerencias con evidencia |
 | `enrich_project(project_id, model)` | Sugerencias para todos |
-| `wiki_graph(project_id)` | Nodos y aristas |
-| `list_affiliations(project_id)` / `set_affiliation(...)` | Afiliaciones |
-| `set_entity_relation(...)` | Territorio/alianzas |
+| `wiki_graph(project_id)` | Nodos y aristas (incluye presencia derivada) |
+| `list_affiliations(project_id)` | Afiliaciones con nombre/tipo |
+| `set_affiliation(...)` / `delete_affiliation(id)` | Afiliación manual |
+| `accept_affiliation(id)` / `reject_affiliation(id)` | Revisar propuesta IA |
+| `list_entity_relations(project_id)` | Alianzas, conflictos y territorios |
+| `set_entity_relation(...)` / `delete_entity_relation(id)` | Relación manual |
+| `accept_entity_relation(id)` / `reject_entity_relation(id)` | Revisar propuesta IA |
+| `extract_affiliations(project_id, model)` | Detección IA con evidencia |
 
 ---
 
@@ -276,8 +333,8 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
   cambios de esquema ni consultas extra.
 - Pestaña **Grafo** dentro de World Building.
 - Nodos dimensionados por grado de relación; protagonistas en color de acento.
-- **Pendiente para la Fase 3:** nodos de facciones/lugares, afiliaciones,
-  presencia y clustering por facción (requiere `character_affiliation`).
+- Ampliado en la **Fase 3** con facciones, lugares, afiliaciones, presencia y
+  clustering por facción.
 
 ### Fase 2 — Campos personalizados + IA con evidencia (✅ implementado)
 
@@ -300,11 +357,19 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 - **Aceptación:** el autor añade un campo, la IA lo rellena con cita y lo
   manual sobrevive a un reanálisis. ✔
 
-### Fase 3 — Afiliaciones y grafo enriquecido (1 sprint)
+### Fase 3 — Afiliaciones y grafo enriquecido (✅ implementado)
 
-- Migración `0012`; extracción de afiliaciones y territorio.
-- Grafo agrupado por facción, ego network, presencia en lugares.
-- **Aceptación:** clusters de facción y aristas personaje-facción visibles.
+- Migración `0012_wiki_graph.sql`: `character_affiliation` y
+  `entity_relation`, con validación de roles/tipos, simetría de
+  alianzas/conflictos y evidencia opcional con escena.
+- Detección IA de afiliaciones con listas cerradas, cita validada y revisión
+  por el autor (`extract_affiliations`).
+- Panel **Vínculos** para CRUD manual y revisión de sugerencias.
+- Grafo con facciones y lugares, filtros por tipo, inspector, ego network,
+  agrupación por facción y presencia derivada de `scene.location`/texto.
+- Duplicar y restaurar proyectos conserva afiliaciones y relaciones.
+- **Aceptación:** se ven aristas personaje→facción/lugar y clusters por
+  facción; la presencia derivada se distingue de los vínculos manuales. ✔
 
 ### Fase 4 — Pulido
 
@@ -323,6 +388,9 @@ type GraphData = { nodes: GraphNode[]; edges: GraphEdge[]; stats: {...} };
 | Modelo local flojo | JSON validado, campos vacíos permitidos, nube opcional |
 | Migración de datos | Tablas aditivas; no se borran columnas existentes |
 | Pérdida de ediciones manuales | `source = manual` intocable por la IA |
+| Presencia derivada mal interpretada | Arista punteada, `origin = derived` y texto «presencia (derivada)»; se calcula por escena y se limita a 5 lugares por personaje |
+| Falsos positivos de nombres («Ana» en «Anabel») | Coincidencia por límites de palabra y alias de al menos 3 caracteres |
+| Duplicados simétricos de alianzas | Canonicalización `a < b` e índice parcial por pareja |
 
 ---
 

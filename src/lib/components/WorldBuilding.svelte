@@ -1,6 +1,7 @@
 <script lang="ts">
   import { trapFocus } from "$lib/focusTrap";
   import WorldGraph from "$lib/components/WorldGraph.svelte";
+  import LinksPanel from "$lib/components/LinksPanel.svelte";
   import FieldManager from "$lib/components/FieldManager.svelte";
   import CharacterFields from "$lib/components/CharacterFields.svelte";
   import type { ChangeEntry, Character, Entity, Relationship } from "$lib/types";
@@ -47,6 +48,7 @@
     | "characters"
     | "relationships"
     | "graph"
+    | "links"
     | "fields"
     | "factions"
     | "locations"
@@ -55,6 +57,7 @@
   let selectedCharacterId = $state<string | null>(null);
   let search = $state("");
   let fieldsVersion = $state(0);
+  let graphVersion = $state(0);
 
   let editingCharacter = $state<Character | null>(null);
   let editingEntity = $state<Entity | null>(null);
@@ -272,6 +275,9 @@
       <button class="tab" class:active={tab === "graph"} onclick={() => (tab = "graph")}>
         Grafo
       </button>
+      <button class="tab" class:active={tab === "links"} onclick={() => (tab = "links")}>
+        Vínculos
+      </button>
       <button class="tab" class:active={tab === "fields"} onclick={() => (tab = "fields")}>
         Campos
       </button>
@@ -376,12 +382,20 @@
         {/if}
       {:else if tab === "graph"}
         <WorldGraph
-          {characters}
-          {relationships}
+          {projectId}
+          refreshKey={graphVersion + fieldsVersion + characters.length + entities.length + relationships.length}
           onselectcharacter={(id) => {
             selectedCharacterId = id;
             tab = "characters";
           }}
+        />
+      {:else if tab === "links"}
+        <LinksPanel
+          {projectId}
+          {characters}
+          {entities}
+          refreshKey={characters.length + entities.length}
+          onchanged={() => (graphVersion += 1)}
         />
       {:else if tab === "fields"}
         <FieldManager {projectId} onchanged={() => (fieldsVersion += 1)} />

@@ -78,6 +78,16 @@ semántico.
   nunca pisa valores manuales y, si no hay texto suficiente, no inventa.
 - **Re-enriquecimiento por personaje** desde su ficha, además del lote completo.
 - Duplicar y restaurar proyectos conserva los campos personalizados.
+- **Vínculos del mundo (Fase 3):** afiliaciones personaje→facción/lugar y
+  relaciones facción↔facción o facción→lugar (alianza, conflicto, territorio).
+- **Detección de afiliaciones con IA:** listas cerradas de entidades, cita
+  textual validada y revisión por el autor; las afiliaciones manuales no se
+  sobrescriben.
+- **Grafo enriquecido:** nodos de personajes, facciones y lugares; filtros por
+  tipo; inspector con «Abrir ficha» y «Aislar entorno»; agrupación por facción.
+- **Presencia derivada** personaje→lugar a partir de `scene.location` y el texto
+  (marcada como derivada, con límite de 5 lugares por personaje).
+- Duplicar y restaurar proyectos conserva afiliaciones, relaciones y campos.
 
 ### Corregido
 

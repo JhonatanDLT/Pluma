@@ -110,6 +110,8 @@ criterio de aceptación.
 | TD-54 | Sin política de terceros generada automáticamente. | Riesgo legal. | P2 | 1d | `cargo about` + `pnpm licenses` en CI. |
 | TD-55 | Los campos personalizados solo admiten `text`, `longtext`, `list` y `number`. | No se pueden modelar fechas, enums ni referencias a otras fichas. | P2 | 2d | Añadir `date`, `enum` (con `options_json`) y validación/UI específicas. |
 | TD-56 | Las sugerencias de IA se guardan en la BD del proyecto sin historial ni auditoría. | No se puede revisar qué propuso el modelo ni cuándo. | P2 | 2d | Tabla de historial o exportación de sugerencias; registrar modelo y fecha sin contenido sensible. |
+| TD-57 | `wiki_graph` recalcula la presencia escaneando todas las escenas en cada apertura. | En manuscritos de 500k palabras el grafo puede tardar y repetir trabajo. | P2 | 2d | Cachear la presencia por `project_fingerprint` y hacer un escaneo único con índice de alias (Aho-Corasick). |
+| TD-58 | La detección IA de relaciones entre entidades (alianzas/territorios) es solo manual. | El autor debe crear esos vínculos a mano. | P2 | 2d | Prompt con contexto por facción y revisión, reutilizando el flujo de afiliaciones. |
 
 ---
 

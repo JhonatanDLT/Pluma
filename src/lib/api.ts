@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Affiliation,
   AnalysisReport,
   BackupInfo,
   Chapter,
@@ -9,6 +10,9 @@ import type {
   CloudProviderInfo,
   EnrichReport,
   Entity,
+  EntityRelation,
+  GraphData,
+  WorldLinkReport,
   IaSettings,
   IaStatus,
   LanguageInfo,
@@ -253,6 +257,60 @@ export const acceptFieldSuggestion = (characterId: string, fieldId: string) =>
   invoke<void>("accept_field_suggestion", { characterId, fieldId });
 export const rejectFieldSuggestion = (characterId: string, fieldId: string) =>
   invoke<void>("reject_field_suggestion", { characterId, fieldId });
+
+// Grafo del mundo: afiliaciones y relaciones entre entidades
+export const getWikiGraph = (projectId: string) =>
+  invoke<GraphData>("wiki_graph", { projectId });
+export const listAffiliations = (projectId: string) =>
+  invoke<Affiliation[]>("list_affiliations", { projectId });
+export const setAffiliation = (
+  projectId: string,
+  characterId: string,
+  entityId: string,
+  role: string,
+  evidence: string | null = null,
+  evidenceSceneId: string | null = null,
+) =>
+  invoke<Affiliation>("set_affiliation", {
+    projectId,
+    characterId,
+    entityId,
+    role,
+    evidence,
+    evidenceSceneId,
+  });
+export const acceptAffiliation = (id: string) =>
+  invoke<void>("accept_affiliation", { id });
+export const rejectAffiliation = (id: string) =>
+  invoke<void>("reject_affiliation", { id });
+export const deleteAffiliation = (id: string) =>
+  invoke<void>("delete_affiliation", { id });
+export const listEntityRelations = (projectId: string) =>
+  invoke<EntityRelation[]>("list_entity_relations", { projectId });
+export const setEntityRelation = (
+  projectId: string,
+  aEntityId: string,
+  bEntityId: string,
+  kind: string,
+  evidence: string | null = null,
+  evidenceSceneId: string | null = null,
+) =>
+  invoke<EntityRelation>("set_entity_relation", {
+    projectId,
+    aEntityId,
+    bEntityId,
+    kind,
+    evidence,
+    evidenceSceneId,
+  });
+export const acceptEntityRelation = (id: string) =>
+  invoke<void>("accept_entity_relation", { id });
+export const rejectEntityRelation = (id: string) =>
+  invoke<void>("reject_entity_relation", { id });
+export const deleteEntityRelation = (id: string) =>
+  invoke<void>("delete_entity_relation", { id });
+export const extractAffiliations = (projectId: string, model: string | null = null) =>
+  invoke<WorldLinkReport>("extract_affiliations", { projectId, model });
 export const correctText = (text: string, model: string | null) =>
   invoke<string>("correct_text", { text, model });
 export const chat = (message: string, model: string | null, projectId: string | null) =>

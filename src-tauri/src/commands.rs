@@ -14,8 +14,9 @@ use crate::export;
 use crate::extract;
 use crate::llm;
 use crate::models::{
-    AnalysisReport, Chapter, Character, CharacterFieldDef, CharacterFieldView, EnrichReport,
-    Entity, FieldSpec, NavEntry, Project, Relationship, Scene, SceneMeta, SearchHit, SnapshotMeta,
+    AffiliationView, AnalysisReport, Chapter, Character, CharacterFieldDef, CharacterFieldView,
+    EnrichReport, Entity, EntityRelationView, FieldSpec, GraphData, NavEntry, Project,
+    Relationship, Scene, SceneMeta, SearchHit, SnapshotMeta, WorldLinkReport,
 };
 use crate::nlp;
 use crate::parser;
@@ -1261,6 +1262,266 @@ pub fn reject_field_suggestion(
 ) -> Result<()> {
     let conn = lock(&db)?;
     repo::reject_field_suggestion(&conn, &character_id, &field_id)
+}
+
+// ---------------------------------------------------------------------------
+// Grafo del mundo: afiliaciones y relaciones entre entidades
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn wiki_graph(db: State<'_, Db>, project_id: String) -> Result<GraphData> {
+    let conn = lock(&db)?;
+    repo::wiki_graph(&conn, &project_id)
+}
+
+#[tauri::command]
+pub fn list_affiliations(db: State<'_, Db>, project_id: String) -> Result<Vec<AffiliationView>> {
+    let conn = lock(&db)?;
+    repo::list_affiliations(&conn, &project_id)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn set_affiliation(
+    db: State<'_, Db>,
+    project_id: String,
+    character_id: String,
+    entity_id: String,
+    role: String,
+    evidence: Option<String>,
+    evidence_scene_id: Option<String>,
+) -> Result<AffiliationView> {
+    let conn = lock(&db)?;
+    repo::set_affiliation_manual(
+        &conn,
+        &project_id,
+        &character_id,
+        &entity_id,
+        &role,
+        evidence.as_deref(),
+        evidence_scene_id.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn accept_affiliation(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::accept_affiliation(&conn, &id)
+}
+
+#[tauri::command]
+pub fn reject_affiliation(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::reject_affiliation(&conn, &id)
+}
+
+#[tauri::command]
+pub fn delete_affiliation(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::delete_affiliation(&conn, &id)
+}
+
+#[tauri::command]
+pub fn list_entity_relations(
+    db: State<'_, Db>,
+    project_id: String,
+) -> Result<Vec<EntityRelationView>> {
+    let conn = lock(&db)?;
+    repo::list_entity_relations(&conn, &project_id)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn set_entity_relation(
+    db: State<'_, Db>,
+    project_id: String,
+    a_entity_id: String,
+    b_entity_id: String,
+    kind: String,
+    evidence: Option<String>,
+    evidence_scene_id: Option<String>,
+) -> Result<EntityRelationView> {
+    let conn = lock(&db)?;
+    repo::set_entity_relation_manual(
+        &conn,
+        &project_id,
+        &a_entity_id,
+        &b_entity_id,
+        &kind,
+        evidence.as_deref(),
+        evidence_scene_id.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn accept_entity_relation(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::accept_entity_relation(&conn, &id)
+}
+
+#[tauri::command]
+pub fn reject_entity_relation(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::reject_entity_relation(&conn, &id)
+}
+
+#[tauri::command]
+pub fn delete_entity_relation(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    repo::delete_entity_relation(&conn, &id)
+}
+
+/// Detecta afiliaciones con el LLM y las guarda como sugerencias con evidencia.
+/// Las afiliaciones manuales nunca se tocan.
+#[tauri::command(async)]
+pub fn extract_affiliations(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    project_id: String,
+    model: Option<String>,
+) -> Result<WorldLinkReport> {
+    let settings = crate::settings::load(&settings_path(&app)?);
+    let model_override = model.as_deref().or(settings.llm_model.as_deref());
+    let backend = llm::resolve_backend(&settings, model_override, llm::DEFAULT_MODEL);
+
+    let (characters, entities, scenes) = {
+        let conn = lock(&db)?;
+        let content = repo::get_project_content(&conn, &project_id)?;
+        let scenes: Vec<(String, String)> = content
+            .iter()
+            .flat_map(|(_, scenes)| {
+                scenes
+                    .iter()
+                    .map(|s| (s.id.clone(), s.content_markdown.clone()))
+            })
+            .collect();
+        let characters = repo::list_characters(&conn, &project_id)?;
+        let entities = repo::list_entities(&conn, &project_id)?;
+        (characters, entities, scenes)
+    };
+
+    let factions: Vec<String> = entities
+        .iter()
+        .filter(|e| e.entity_type == "faction")
+        .map(|e| e.name.clone())
+        .collect();
+    let locations: Vec<String> = entities
+        .iter()
+        .filter(|e| e.entity_type == "location")
+        .map(|e| e.name.clone())
+        .collect();
+
+    // Índice nombre/alias normalizado → entidad.
+    let mut entity_index: HashMap<String, &Entity> = HashMap::new();
+    for entity in &entities {
+        let term = crate::fields::normalize_text(&entity.name);
+        entity_index.entry(term).or_insert(entity);
+        for alias in &entity.aliases {
+            let term = crate::fields::normalize_text(alias);
+            if !term.is_empty() {
+                entity_index.entry(term).or_insert(entity);
+            }
+        }
+    }
+
+    let texts: Vec<String> = scenes.iter().map(|(_, text)| text.clone()).collect();
+    let mut report = WorldLinkReport {
+        characters: characters.len(),
+        ..Default::default()
+    };
+    let mut attempted = 0usize;
+    let mut failed = 0usize;
+
+    for (index, character) in characters.iter().enumerate() {
+        emit_progress(&app, index, characters.len(), "afiliaciones");
+        let context = llm::context_for(&character.name, &texts);
+        if crate::fields::normalize_text(&context).chars().count() < 120 {
+            report.insufficient += 1;
+            continue;
+        }
+
+        attempted += 1;
+        let suggestions = match llm::suggest_affiliations(
+            &backend,
+            &character.name,
+            &context,
+            &factions,
+            &locations,
+        ) {
+            Ok(suggestions) => suggestions,
+            Err(error) => {
+                failed += 1;
+                log::warn!("afiliaciones de {} fallaron: {error}", character.name);
+                report.skipped += 1;
+                continue;
+            }
+        };
+
+        let conn = lock(&db)?;
+        repo::clear_ai_affiliations(&conn, &character.id)?;
+        for suggestion in suggestions {
+            let Some(entity_name) = suggestion.entity.as_deref() else {
+                report.skipped += 1;
+                continue;
+            };
+            let Some(entity) = entity_index.get(&crate::fields::normalize_text(entity_name)) else {
+                report.skipped += 1;
+                continue;
+            };
+            let role = suggestion
+                .role
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
+            if repo::validate_affiliation_role(&entity.entity_type, &role).is_err() {
+                report.skipped += 1;
+                continue;
+            }
+            let evidence = suggestion
+                .evidence
+                .as_deref()
+                .map(str::trim)
+                .filter(|e| !e.is_empty());
+            let Some(evidence) = evidence else {
+                report.insufficient += 1;
+                continue;
+            };
+            if !crate::fields::evidence_in_context(&context, evidence) {
+                report.insufficient += 1;
+                continue;
+            }
+            let evidence_scene_id = scenes
+                .iter()
+                .find(|(_, text)| crate::fields::evidence_in_context(text, evidence))
+                .map(|(id, _)| id.as_str());
+            let stored = repo::suggest_affiliation(
+                &conn,
+                &project_id,
+                &character.id,
+                &entity.id,
+                &role,
+                suggestion.confidence,
+                Some(evidence),
+                evidence_scene_id,
+            )?;
+            if stored {
+                report.proposed += 1;
+            } else {
+                report.skipped += 1;
+            }
+        }
+    }
+
+    if attempted > 0 && failed == attempted {
+        return Err(AppError::Internal(
+            "no se pudo contactar con el modelo de IA; revisa Ollama o la configuración de la nube"
+                .into(),
+        ));
+    }
+
+    emit_progress(&app, characters.len(), characters.len(), "completado");
+    Ok(report)
 }
 
 /// Valida una propuesta del LLM y la guarda como sugerencia. La evidencia debe

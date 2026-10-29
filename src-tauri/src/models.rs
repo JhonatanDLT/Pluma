@@ -319,6 +319,119 @@ pub struct FieldSuggestion {
     pub reason: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Grafo del mundo: afiliaciones, relaciones entre entidades y nodos/aristas
+// ---------------------------------------------------------------------------
+
+/// Vínculo entre un personaje y una facción o lugar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AffiliationView {
+    pub id: String,
+    pub project_id: String,
+    pub character_id: String,
+    pub character_name: String,
+    pub entity_id: String,
+    pub entity_name: String,
+    pub entity_type: String,
+    pub role: String,
+    pub source: String,
+    pub confidence: Option<f64>,
+    pub evidence: Option<String>,
+    pub evidence_scene_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Relación entre dos entidades (facciones o lugares).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityRelationView {
+    pub id: String,
+    pub project_id: String,
+    pub a_entity_id: String,
+    pub a_name: String,
+    pub a_type: String,
+    pub b_entity_id: String,
+    pub b_name: String,
+    pub b_type: String,
+    pub kind: String,
+    pub source: String,
+    pub confidence: Option<f64>,
+    pub evidence: Option<String>,
+    pub evidence_scene_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Nodo del grafo. Los IDs van con prefijo (`char:` / `entity:`) porque los
+/// espacios de IDs de personajes y entidades son independientes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNode {
+    pub id: String,
+    pub kind: String,
+    /// `character`, `faction` o `location`.
+    pub label: String,
+    pub mentions: i64,
+    pub role: Option<String>,
+    /// IDs de las facciones a las que pertenece (para colorear y agrupar).
+    pub faction_ids: Vec<String>,
+}
+
+/// Arista del grafo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphEdge {
+    pub id: String,
+    pub source: String,
+    pub target: String,
+    /// relationship | affiliation | presence | territory | alliance | conflict
+    pub kind: String,
+    pub subtype: Option<String>,
+    pub weight: f64,
+    /// manual | ai | derived
+    pub origin: String,
+    pub evidence: Option<String>,
+    pub evidence_scene_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GraphStats {
+    pub characters: usize,
+    pub factions: usize,
+    pub locations: usize,
+    pub relationships: usize,
+    pub affiliations: usize,
+    pub presence: usize,
+    pub entity_relations: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GraphData {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+    pub stats: GraphStats,
+}
+
+/// Resumen de la detección de vínculos con IA.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorldLinkReport {
+    pub characters: usize,
+    pub proposed: usize,
+    pub skipped: usize,
+    pub insufficient: usize,
+}
+
+/// Propuesta de afiliación devuelta por el LLM.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AffiliationSuggestion {
+    #[serde(default)]
+    pub entity: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+    #[serde(default)]
+    pub evidence: Option<String>,
+}
+
 /// Resultado de una búsqueda full-text en las escenas de un proyecto.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {

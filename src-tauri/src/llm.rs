@@ -512,6 +512,73 @@ pub fn suggest_character_fields(
     Ok(out)
 }
 
+/// Pide al LLM que relacione a un personaje con facciones y lugares de una
+/// lista cerrada. La evidencia es obligatoria y debe ser una cita textual.
+pub fn suggest_affiliations(
+    backend: &Backend,
+    character_name: &str,
+    context: &str,
+    factions: &[String],
+    locations: &[String],
+) -> Result<Vec<crate::models::AffiliationSuggestion>> {
+    if factions.is_empty() && locations.is_empty() {
+        return Ok(Vec::new());
+    }
+    let context = truncate(context, 6000);
+    let format_list = |items: &[String]| {
+        if items.is_empty() {
+            "(ninguna)".to_string()
+        } else {
+            items
+                .iter()
+                .map(|item| format!("- {item}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    };
+    let prompt = format!(
+        "Eres un analista literario riguroso. Determina a qué facciones y lugares \
+         pertenece o frecuenta el personaje \"{character_name}\", usando SOLO el TEXTO.\n\
+         Reglas:\n\
+         1. Elige únicamente entidades de las listas. No inventes nombres.\n\
+         2. Para una facción usa el rol: leader, member, ally o rival.\n\
+         3. Para un lugar usa el rol: resident, origin o visitor.\n\
+         4. Incluye una cita literal y breve del texto como \"evidence\".\n\
+         5. Si no hay evidencia clara, devuelve una lista vacía. No adivines.\n\
+         6. \"confidence\" es un número entre 0 y 1.\n\
+         7. No incluyas texto fuera del JSON.\n\n\
+         Facciones:\n{factions}\n\nLugares:\n{locations}\n\n\
+         Formato exacto:\n\
+         {{\"affiliations\":[{{\"entity\":\"Nombre exacto\",\"role\":\"member\",\"confidence\":0.8,\"evidence\":\"cita literal\"}}]}}\n\n\
+         TEXTO:\n{context}",
+        factions = format_list(factions),
+        locations = format_list(locations)
+    );
+
+    let raw = backend.generate_json(&prompt)?;
+    let json = extract_json(&raw);
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(|e| {
+        AppError::Internal(format!(
+            "el modelo no devolvió un JSON de vínculos válido: {e}"
+        ))
+    })?;
+    let list = value
+        .get("affiliations")
+        .or_else(|| value.get("afiliaciones"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .or_else(|| value.as_array().cloned())
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    for item in list {
+        if let Ok(suggestion) = serde_json::from_value::<crate::models::AffiliationSuggestion>(item)
+        {
+            out.push(suggestion);
+        }
+    }
+    Ok(out)
+}
+
 /// Construye el contexto (escenas que mencionan al personaje).
 pub fn context_for(name: &str, texts: &[String]) -> String {
     let needle = crate::repo::normalize_key(name);

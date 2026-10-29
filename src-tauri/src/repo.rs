@@ -20,8 +20,9 @@ use crate::error::{AppError, Result};
 use serde_json::Value;
 
 use crate::models::{
-    BUILTIN_FIELDS, Chapter, Character, CharacterFieldDef, CharacterFieldValue, CharacterFieldView,
-    Entity, NavEntry, Project, Relationship, Scene, SceneMeta, SearchHit, SnapshotMeta,
+    AffiliationView, BUILTIN_FIELDS, Chapter, Character, CharacterFieldDef, CharacterFieldValue,
+    CharacterFieldView, Entity, EntityRelationView, GraphData, GraphEdge, GraphNode, GraphStats,
+    NavEntry, Project, Relationship, Scene, SceneMeta, SearchHit, SnapshotMeta,
 };
 use crate::parser::ParsedManuscript;
 
@@ -138,6 +139,8 @@ pub struct ProjectSnapshot {
     pub entities: Vec<Entity>,
     pub field_defs: Vec<CharacterFieldDef>,
     pub field_values: Vec<CharacterFieldValue>,
+    pub affiliations: Vec<AffiliationView>,
+    pub entity_relations: Vec<EntityRelationView>,
 }
 
 pub fn read_project_snapshot(conn: &Connection, project_id: &str) -> Result<ProjectSnapshot> {
@@ -153,6 +156,8 @@ pub fn read_project_snapshot(conn: &Connection, project_id: &str) -> Result<Proj
     let entities = list_entities(conn, project_id)?;
     let field_defs = list_field_defs(conn, project_id)?;
     let field_values = list_field_values(conn, project_id)?;
+    let affiliations = list_affiliations(conn, project_id)?;
+    let entity_relations = list_entity_relations(conn, project_id)?;
     Ok(ProjectSnapshot {
         project,
         chapters,
@@ -162,6 +167,8 @@ pub fn read_project_snapshot(conn: &Connection, project_id: &str) -> Result<Proj
         entities,
         field_defs,
         field_values,
+        affiliations,
+        entity_relations,
     })
 }
 
@@ -221,11 +228,13 @@ pub fn insert_project_snapshot(
         )?;
     }
 
+    let mut scene_ids: HashMap<String, String> = HashMap::new();
     for scene in &snapshot.scenes {
         let Some(new_chapter_id) = chapter_ids.get(&scene.chapter_id) else {
             continue;
         };
         let new_scene = Scene::new(new_chapter_id, scene.position, scene.title.clone());
+        scene_ids.insert(scene.id.clone(), new_scene.id.clone());
         tx.execute(
             "INSERT INTO scene (id, chapter_id, position, title, content_markdown,
              summary, word_count, created_at, updated_at, status, pov, location, time_label)
@@ -348,13 +357,16 @@ pub fn insert_project_snapshot(
         }
     }
 
+    let mut entity_ids: HashMap<String, String> = HashMap::new();
     for e in &snapshot.entities {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        entity_ids.insert(e.id.clone(), new_id.clone());
         tx.execute(
             "INSERT INTO entity (id, project_id, name, entity_type, aliases_json,
              description, mention_count, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
-                uuid::Uuid::new_v4().to_string(),
+                new_id,
                 new_project.id,
                 e.name,
                 e.entity_type,
@@ -365,6 +377,73 @@ pub fn insert_project_snapshot(
                 e.updated_at
             ],
         )?;
+    }
+
+    for affiliation in &snapshot.affiliations {
+        if let (Some(character_id), Some(entity_id)) = (
+            character_ids.get(&affiliation.character_id),
+            entity_ids.get(&affiliation.entity_id),
+        ) {
+            let evidence_scene_id = affiliation
+                .evidence_scene_id
+                .as_ref()
+                .and_then(|id| scene_ids.get(id));
+            tx.execute(
+                "INSERT INTO character_affiliation
+                 (id, project_id, character_id, entity_id, role, source, confidence, evidence,
+                  evidence_scene_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    new_project.id,
+                    character_id,
+                    entity_id,
+                    affiliation.role,
+                    affiliation.source,
+                    affiliation.confidence,
+                    affiliation.evidence,
+                    evidence_scene_id,
+                    affiliation.created_at
+                ],
+            )?;
+        }
+    }
+
+    for relation in &snapshot.entity_relations {
+        if let (Some(a), Some(b)) = (
+            entity_ids.get(&relation.a_entity_id),
+            entity_ids.get(&relation.b_entity_id),
+        ) {
+            // Las alianzas/conflictos se guardan con IDs ordenados; los IDs
+            // nuevos pueden invertir el orden original.
+            let (a, b) = if relation.kind == "territory" || a < b {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            let evidence_scene_id = relation
+                .evidence_scene_id
+                .as_ref()
+                .and_then(|id| scene_ids.get(id));
+            tx.execute(
+                "INSERT INTO entity_relation
+                 (id, project_id, a_entity_id, b_entity_id, kind, source, confidence, evidence,
+                  evidence_scene_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    new_project.id,
+                    a,
+                    b,
+                    relation.kind,
+                    relation.source,
+                    relation.confidence,
+                    relation.evidence,
+                    evidence_scene_id,
+                    relation.created_at
+                ],
+            )?;
+        }
     }
 
     tx.commit()?;
@@ -1655,6 +1734,898 @@ pub fn reject_field_suggestion(
 }
 
 // ---------------------------------------------------------------------------
+// Afiliaciones, relaciones entre entidades y grafo del mundo
+// ---------------------------------------------------------------------------
+
+const FACTION_ROLES: &[&str] = &["leader", "member", "ally", "rival"];
+const LOCATION_ROLES: &[&str] = &["resident", "origin", "visitor"];
+
+fn entity_in_project(conn: &Connection, id: &str) -> Result<Entity> {
+    conn.query_row(
+        "SELECT id, project_id, name, entity_type, aliases_json, description, mention_count,
+                created_at, updated_at
+         FROM entity WHERE id = ?1",
+        params![id],
+        entity_from_row,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::NotFound(format!("entidad {id}")))
+}
+
+pub fn validate_affiliation_role(entity_type: &str, role: &str) -> Result<()> {
+    let valid = match entity_type {
+        "faction" => FACTION_ROLES.contains(&role),
+        "location" => LOCATION_ROLES.contains(&role),
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(AppError::Validation(format!(
+            "rol «{role}» no válido para una entidad de tipo {entity_type}"
+        )))
+    }
+}
+
+fn validate_evidence_scene(
+    conn: &Connection,
+    project_id: &str,
+    scene_id: Option<&str>,
+) -> Result<()> {
+    let Some(scene_id) = scene_id else {
+        return Ok(());
+    };
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM scene s JOIN chapter c ON c.id = s.chapter_id
+             WHERE s.id = ?1 AND c.project_id = ?2",
+            params![scene_id, project_id],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !exists {
+        return Err(AppError::Validation(
+            "la escena de evidencia no pertenece al proyecto".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn affiliation_view_from_row(row: &Row<'_>) -> rusqlite::Result<AffiliationView> {
+    Ok(AffiliationView {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        character_id: row.get(2)?,
+        character_name: row.get(3)?,
+        entity_id: row.get(4)?,
+        entity_name: row.get(5)?,
+        entity_type: row.get(6)?,
+        role: row.get(7)?,
+        source: row.get(8)?,
+        confidence: row.get(9)?,
+        evidence: row.get(10)?,
+        evidence_scene_id: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+    })
+}
+
+const AFFILIATION_SELECT: &str =
+    "SELECT a.id, a.project_id, a.character_id, c.name, a.entity_id, e.name, e.entity_type,
+            a.role, a.source, a.confidence, a.evidence, a.evidence_scene_id,
+            a.created_at, a.updated_at
+     FROM character_affiliation a
+     JOIN character c ON c.id = a.character_id
+     JOIN entity e ON e.id = a.entity_id";
+
+pub fn list_affiliations(conn: &Connection, project_id: &str) -> Result<Vec<AffiliationView>> {
+    let mut stmt = conn.prepare(&format!(
+        "{AFFILIATION_SELECT} WHERE a.project_id = ?1 ORDER BY c.name ASC, e.name ASC"
+    ))?;
+    let rows = stmt
+        .query_map(params![project_id], affiliation_view_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn affiliation_by_id(conn: &Connection, id: &str) -> Result<AffiliationView> {
+    conn.query_row(
+        &format!("{AFFILIATION_SELECT} WHERE a.id = ?1"),
+        params![id],
+        affiliation_view_from_row,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::NotFound(format!("afiliación {id}")))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_affiliation(
+    conn: &Connection,
+    project_id: &str,
+    character_id: &str,
+    entity_id: &str,
+    role: &str,
+    source: &str,
+    confidence: Option<f64>,
+    evidence: Option<&str>,
+    evidence_scene_id: Option<&str>,
+) -> Result<Option<String>> {
+    let character = character_in_project(conn, character_id)?;
+    let entity = entity_in_project(conn, entity_id)?;
+    if character.project_id != project_id || entity.project_id != project_id {
+        return Err(AppError::Validation(
+            "el personaje o la entidad pertenecen a otro proyecto".into(),
+        ));
+    }
+    validate_affiliation_role(&entity.entity_type, role)?;
+    validate_evidence_scene(conn, project_id, evidence_scene_id)?;
+
+    let now = Utc::now().to_rfc3339();
+    let confidence = confidence.map(|c| c.clamp(0.0, 1.0));
+    let changed = if source == "manual" {
+        conn.execute(
+            "INSERT INTO character_affiliation
+             (id, project_id, character_id, entity_id, role, source, confidence, evidence,
+              evidence_scene_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'manual', NULL, ?6, ?7, ?8, ?8)
+             ON CONFLICT(character_id, entity_id) DO UPDATE SET
+                role = excluded.role,
+                source = 'manual',
+                confidence = NULL,
+                evidence = excluded.evidence,
+                evidence_scene_id = excluded.evidence_scene_id,
+                updated_at = excluded.updated_at",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                character_id,
+                entity_id,
+                role,
+                evidence,
+                evidence_scene_id,
+                now
+            ],
+        )?
+    } else {
+        conn.execute(
+            "INSERT INTO character_affiliation
+             (id, project_id, character_id, entity_id, role, source, confidence, evidence,
+              evidence_scene_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'ai', ?6, ?7, ?8, ?9, ?9)
+             ON CONFLICT(character_id, entity_id) DO UPDATE SET
+                role = excluded.role,
+                source = 'ai',
+                confidence = excluded.confidence,
+                evidence = excluded.evidence,
+                evidence_scene_id = excluded.evidence_scene_id,
+                updated_at = excluded.updated_at
+             WHERE character_affiliation.source = 'ai'",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                character_id,
+                entity_id,
+                role,
+                confidence,
+                evidence,
+                evidence_scene_id,
+                now
+            ],
+        )?
+    };
+    if changed == 0 {
+        return Ok(None);
+    }
+    let id: String = conn.query_row(
+        "SELECT id FROM character_affiliation WHERE character_id = ?1 AND entity_id = ?2",
+        params![character_id, entity_id],
+        |row| row.get(0),
+    )?;
+    Ok(Some(id))
+}
+
+pub fn set_affiliation_manual(
+    conn: &Connection,
+    project_id: &str,
+    character_id: &str,
+    entity_id: &str,
+    role: &str,
+    evidence: Option<&str>,
+    evidence_scene_id: Option<&str>,
+) -> Result<AffiliationView> {
+    let id = upsert_affiliation(
+        conn,
+        project_id,
+        character_id,
+        entity_id,
+        role,
+        "manual",
+        None,
+        evidence,
+        evidence_scene_id,
+    )?
+    .ok_or_else(|| AppError::Internal("no se pudo guardar la afiliación".into()))?;
+    affiliation_by_id(conn, &id)
+}
+
+/// Guarda una propuesta de la IA. Devuelve `false` si ya existe un valor manual.
+#[allow(clippy::too_many_arguments)]
+pub fn suggest_affiliation(
+    conn: &Connection,
+    project_id: &str,
+    character_id: &str,
+    entity_id: &str,
+    role: &str,
+    confidence: Option<f64>,
+    evidence: Option<&str>,
+    evidence_scene_id: Option<&str>,
+) -> Result<bool> {
+    Ok(upsert_affiliation(
+        conn,
+        project_id,
+        character_id,
+        entity_id,
+        role,
+        "ai",
+        confidence,
+        evidence,
+        evidence_scene_id,
+    )?
+    .is_some())
+}
+
+/// Borra las sugerencias de IA de un personaje antes de un nuevo análisis,
+/// conservando siempre las afiliaciones manuales.
+pub fn clear_ai_affiliations(conn: &Connection, character_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM character_affiliation WHERE character_id = ?1 AND source = 'ai'",
+        params![character_id],
+    )?;
+    Ok(())
+}
+
+pub fn accept_affiliation(conn: &Connection, id: &str) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE character_affiliation
+         SET source = 'manual', confidence = NULL, updated_at = ?1
+         WHERE id = ?2 AND source = 'ai'",
+        params![Utc::now().to_rfc3339(), id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound("sugerencia de afiliación".into()));
+    }
+    Ok(())
+}
+
+pub fn reject_affiliation(conn: &Connection, id: &str) -> Result<()> {
+    let affected = conn.execute(
+        "DELETE FROM character_affiliation WHERE id = ?1 AND source = 'ai'",
+        params![id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound("sugerencia de afiliación".into()));
+    }
+    Ok(())
+}
+
+pub fn delete_affiliation(conn: &Connection, id: &str) -> Result<()> {
+    let affected = conn.execute(
+        "DELETE FROM character_affiliation WHERE id = ?1",
+        params![id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("afiliación {id}")));
+    }
+    Ok(())
+}
+
+fn entity_relation_view_from_row(row: &Row<'_>) -> rusqlite::Result<EntityRelationView> {
+    Ok(EntityRelationView {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        a_entity_id: row.get(2)?,
+        a_name: row.get(3)?,
+        a_type: row.get(4)?,
+        b_entity_id: row.get(5)?,
+        b_name: row.get(6)?,
+        b_type: row.get(7)?,
+        kind: row.get(8)?,
+        source: row.get(9)?,
+        confidence: row.get(10)?,
+        evidence: row.get(11)?,
+        evidence_scene_id: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
+    })
+}
+
+const ENTITY_RELATION_SELECT: &str =
+    "SELECT r.id, r.project_id, r.a_entity_id, a.name, a.entity_type,
+            r.b_entity_id, b.name, b.entity_type, r.kind, r.source, r.confidence,
+            r.evidence, r.evidence_scene_id, r.created_at, r.updated_at
+     FROM entity_relation r
+     JOIN entity a ON a.id = r.a_entity_id
+     JOIN entity b ON b.id = r.b_entity_id";
+
+pub fn list_entity_relations(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<EntityRelationView>> {
+    let mut stmt = conn.prepare(&format!(
+        "{ENTITY_RELATION_SELECT} WHERE r.project_id = ?1 ORDER BY a.name ASC, b.name ASC"
+    ))?;
+    let rows = stmt
+        .query_map(params![project_id], entity_relation_view_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn entity_relation_by_id(conn: &Connection, id: &str) -> Result<EntityRelationView> {
+    conn.query_row(
+        &format!("{ENTITY_RELATION_SELECT} WHERE r.id = ?1"),
+        params![id],
+        entity_relation_view_from_row,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::NotFound(format!("relación {id}")))
+}
+
+fn validate_entity_relation_kind(a_type: &str, b_type: &str, kind: &str) -> Result<()> {
+    let valid = match kind {
+        "alliance" | "conflict" => a_type == "faction" && b_type == "faction",
+        "territory" => a_type == "faction" && b_type == "location",
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(AppError::Validation(match kind {
+            "alliance" | "conflict" => {
+                "las alianzas y conflictos solo unen facciones entre sí".into()
+            }
+            "territory" => "el territorio une una facción con un lugar".into(),
+            other => format!("tipo de relación no soportado: {other}"),
+        }))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_entity_relation(
+    conn: &Connection,
+    project_id: &str,
+    a_entity_id: &str,
+    b_entity_id: &str,
+    kind: &str,
+    source: &str,
+    confidence: Option<f64>,
+    evidence: Option<&str>,
+    evidence_scene_id: Option<&str>,
+) -> Result<Option<String>> {
+    if a_entity_id == b_entity_id {
+        return Err(AppError::Validation(
+            "una entidad no puede relacionarse consigo misma".into(),
+        ));
+    }
+    let a = entity_in_project(conn, a_entity_id)?;
+    let b = entity_in_project(conn, b_entity_id)?;
+    if a.project_id != project_id || b.project_id != project_id {
+        return Err(AppError::Validation(
+            "las entidades pertenecen a otro proyecto".into(),
+        ));
+    }
+    validate_evidence_scene(conn, project_id, evidence_scene_id)?;
+
+    // Alianzas y conflictos son simétricos: se guardan con un orden estable.
+    // El territorio es direccional (facción → lugar) y conserva el orden.
+    let (a_id, b_id) = if kind == "territory" || a_entity_id < b_entity_id {
+        (a_entity_id.to_string(), b_entity_id.to_string())
+    } else {
+        (b_entity_id.to_string(), a_entity_id.to_string())
+    };
+    let (a_type, b_type) = if a_id == a_entity_id {
+        (a.entity_type.as_str(), b.entity_type.as_str())
+    } else {
+        (b.entity_type.as_str(), a.entity_type.as_str())
+    };
+    validate_entity_relation_kind(a_type, b_type, kind)?;
+
+    if matches!(kind, "alliance" | "conflict") {
+        let opposite = if kind == "alliance" {
+            "conflict"
+        } else {
+            "alliance"
+        };
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM entity_relation
+                 WHERE a_entity_id = ?1 AND b_entity_id = ?2 AND kind = ?3",
+                params![a_id, b_id, opposite],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if exists {
+            return Err(AppError::Validation(format!(
+                "ya existe una relación de {opposite} entre estas entidades; elimínala antes"
+            )));
+        }
+    }
+
+    let now = Utc::now().to_rfc3339();
+    let confidence = confidence.map(|c| c.clamp(0.0, 1.0));
+    let changed = if source == "manual" {
+        conn.execute(
+            "INSERT INTO entity_relation
+             (id, project_id, a_entity_id, b_entity_id, kind, source, confidence, evidence,
+              evidence_scene_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'manual', NULL, ?6, ?7, ?8, ?8)
+             ON CONFLICT(a_entity_id, b_entity_id, kind) DO UPDATE SET
+                source = 'manual',
+                confidence = NULL,
+                evidence = excluded.evidence,
+                evidence_scene_id = excluded.evidence_scene_id,
+                updated_at = excluded.updated_at",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                a_id,
+                b_id,
+                kind,
+                evidence,
+                evidence_scene_id,
+                now
+            ],
+        )?
+    } else {
+        conn.execute(
+            "INSERT INTO entity_relation
+             (id, project_id, a_entity_id, b_entity_id, kind, source, confidence, evidence,
+              evidence_scene_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'ai', ?6, ?7, ?8, ?9, ?9)
+             ON CONFLICT(a_entity_id, b_entity_id, kind) DO UPDATE SET
+                source = 'ai',
+                confidence = excluded.confidence,
+                evidence = excluded.evidence,
+                evidence_scene_id = excluded.evidence_scene_id,
+                updated_at = excluded.updated_at
+             WHERE entity_relation.source = 'ai'",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                a_id,
+                b_id,
+                kind,
+                confidence,
+                evidence,
+                evidence_scene_id,
+                now
+            ],
+        )?
+    };
+    if changed == 0 {
+        return Ok(None);
+    }
+    let id: String = conn.query_row(
+        "SELECT id FROM entity_relation
+         WHERE a_entity_id = ?1 AND b_entity_id = ?2 AND kind = ?3",
+        params![a_id, b_id, kind],
+        |row| row.get(0),
+    )?;
+    Ok(Some(id))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn set_entity_relation_manual(
+    conn: &Connection,
+    project_id: &str,
+    a_entity_id: &str,
+    b_entity_id: &str,
+    kind: &str,
+    evidence: Option<&str>,
+    evidence_scene_id: Option<&str>,
+) -> Result<EntityRelationView> {
+    let id = upsert_entity_relation(
+        conn,
+        project_id,
+        a_entity_id,
+        b_entity_id,
+        kind,
+        "manual",
+        None,
+        evidence,
+        evidence_scene_id,
+    )?
+    .ok_or_else(|| AppError::Internal("no se pudo guardar la relación".into()))?;
+    entity_relation_by_id(conn, &id)
+}
+
+#[allow(dead_code, clippy::too_many_arguments)]
+pub fn suggest_entity_relation(
+    conn: &Connection,
+    project_id: &str,
+    a_entity_id: &str,
+    b_entity_id: &str,
+    kind: &str,
+    confidence: Option<f64>,
+    evidence: Option<&str>,
+    evidence_scene_id: Option<&str>,
+) -> Result<bool> {
+    Ok(upsert_entity_relation(
+        conn,
+        project_id,
+        a_entity_id,
+        b_entity_id,
+        kind,
+        "ai",
+        confidence,
+        evidence,
+        evidence_scene_id,
+    )?
+    .is_some())
+}
+
+pub fn accept_entity_relation(conn: &Connection, id: &str) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE entity_relation SET source = 'manual', confidence = NULL, updated_at = ?1
+         WHERE id = ?2 AND source = 'ai'",
+        params![Utc::now().to_rfc3339(), id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound("sugerencia de relación".into()));
+    }
+    Ok(())
+}
+
+pub fn reject_entity_relation(conn: &Connection, id: &str) -> Result<()> {
+    let affected = conn.execute(
+        "DELETE FROM entity_relation WHERE id = ?1 AND source = 'ai'",
+        params![id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound("sugerencia de relación".into()));
+    }
+    Ok(())
+}
+
+pub fn delete_entity_relation(conn: &Connection, id: &str) -> Result<()> {
+    let affected = conn.execute("DELETE FROM entity_relation WHERE id = ?1", params![id])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("relación {id}")));
+    }
+    Ok(())
+}
+
+/// Términos normalizados (nombre + alias) con al menos 3 caracteres.
+fn graph_terms(name: &str, aliases: &[String]) -> Vec<String> {
+    let mut terms = Vec::new();
+    for raw in std::iter::once(name).chain(aliases.iter().map(String::as_str)) {
+        let term = crate::fields::normalize_text(raw);
+        if term.chars().count() >= 3 && !terms.contains(&term) {
+            terms.push(term);
+        }
+    }
+    terms
+}
+
+/// Busca un término respetando límites de palabra (evita «Ana» dentro de
+/// «Anabel»). Devuelve el número de apariciones.
+fn count_term(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    haystack
+        .match_indices(needle)
+        .filter(|(index, _)| {
+            let before = haystack[..*index].chars().next_back();
+            let after = haystack[index + needle.len()..].chars().next();
+            before.is_none_or(|c| !c.is_alphanumeric())
+                && after.is_none_or(|c| !c.is_alphanumeric())
+        })
+        .count()
+}
+
+fn count_any_term(haystack: &str, terms: &[String]) -> usize {
+    terms.iter().map(|term| count_term(haystack, term)).sum()
+}
+
+/// Resuelve el lugar de una escena: primero `scene.location` y, si no hay
+/// coincidencia, el nombre de lugar más largo mencionado en el texto.
+fn resolve_location(
+    raw_location: Option<&str>,
+    text: &str,
+    locations: &[(String, Vec<String>, i64)],
+) -> Option<String> {
+    if let Some(raw) = raw_location {
+        let normalized = crate::fields::normalize_text(raw);
+        if !normalized.is_empty() {
+            let mut best: Option<(&String, usize)> = None;
+            for (id, terms, _) in locations {
+                for term in terms {
+                    if normalized == *term {
+                        return Some(id.clone());
+                    }
+                    if count_term(&normalized, term) > 0
+                        && best.is_none_or(|(_, length)| term.len() > length)
+                    {
+                        best = Some((id, term.len()));
+                    }
+                }
+            }
+            if let Some((id, _)) = best {
+                return Some(id.clone());
+            }
+        }
+    }
+
+    let mut best: Option<(&String, usize, i64)> = None;
+    for (id, terms, mentions) in locations {
+        for term in terms {
+            if count_term(text, term) > 0
+                && best.is_none_or(|(_, length, old_mentions)| {
+                    term.len() > length || (term.len() == length && *mentions > old_mentions)
+                })
+            {
+                best = Some((id, term.len(), *mentions));
+            }
+        }
+    }
+    best.map(|(id, _, _)| id.clone())
+}
+
+/// `(scene_id, content_markdown, location, pov)`.
+type SceneRow = (String, String, Option<String>, Option<String>);
+
+fn scene_rows(conn: &Connection, project_id: &str) -> Result<Vec<SceneRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.content_markdown, s.location, s.pov
+         FROM scene s JOIN chapter c ON c.id = s.chapter_id
+         WHERE c.project_id = ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Construye el grafo del mundo: personajes, facciones, lugares, relaciones,
+/// afiliaciones y presencia derivada de las escenas.
+pub fn wiki_graph(conn: &Connection, project_id: &str) -> Result<GraphData> {
+    let characters = list_characters(conn, project_id)?;
+    let entities = list_entities(conn, project_id)?;
+    let relationships = list_relationships(conn, project_id)?;
+    let affiliations = list_affiliations(conn, project_id)?;
+    let entity_relations = list_entity_relations(conn, project_id)?;
+
+    let character_terms: Vec<(String, Vec<String>)> = characters
+        .iter()
+        .map(|c| (c.id.clone(), graph_terms(&c.name, &c.aliases)))
+        .collect();
+    let location_terms: Vec<(String, Vec<String>, i64)> = entities
+        .iter()
+        .filter(|e| e.entity_type == "location")
+        .map(|e| {
+            (
+                e.id.clone(),
+                graph_terms(&e.name, &e.aliases),
+                e.mention_count,
+            )
+        })
+        .collect();
+
+    let mut mentions: HashMap<String, i64> = HashMap::new();
+    let mut presence: HashMap<(String, String), i64> = HashMap::new();
+    let mut pov_by_term: HashMap<String, String> = HashMap::new();
+    for (character_id, terms) in &character_terms {
+        for term in terms {
+            pov_by_term
+                .entry(term.clone())
+                .or_insert(character_id.clone());
+        }
+    }
+
+    for (_, content, location, pov) in scene_rows(conn, project_id)? {
+        let text = crate::fields::normalize_text(&content);
+        let mut present: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (character_id, terms) in &character_terms {
+            let hits = count_any_term(&text, terms);
+            if hits > 0 {
+                *mentions.entry(character_id.clone()).or_insert(0) += hits as i64;
+                present.insert(character_id.clone());
+            }
+        }
+        if let Some(pov) = pov {
+            let normalized = crate::fields::normalize_text(&pov);
+            if let Some(character_id) = pov_by_term.get(&normalized) {
+                *mentions.entry(character_id.clone()).or_insert(0) += 1;
+                present.insert(character_id.clone());
+            }
+        }
+        if let Some(location_id) = resolve_location(location.as_deref(), &text, &location_terms) {
+            for character_id in present {
+                *presence
+                    .entry((character_id, location_id.clone()))
+                    .or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut faction_ids: HashMap<String, Vec<String>> = HashMap::new();
+    for affiliation in &affiliations {
+        if affiliation.entity_type == "faction" {
+            faction_ids
+                .entry(affiliation.character_id.clone())
+                .or_default()
+                .push(affiliation.entity_id.clone());
+        }
+    }
+
+    let mut nodes = Vec::with_capacity(characters.len() + entities.len());
+    for character in &characters {
+        nodes.push(GraphNode {
+            id: format!("char:{}", character.id),
+            kind: "character".into(),
+            label: character.name.clone(),
+            mentions: mentions.get(&character.id).copied().unwrap_or(0),
+            role: character.role.clone(),
+            faction_ids: faction_ids.get(&character.id).cloned().unwrap_or_default(),
+        });
+    }
+    for entity in &entities {
+        let kind = match entity.entity_type.as_str() {
+            "faction" => "faction",
+            "location" => "location",
+            _ => continue,
+        };
+        nodes.push(GraphNode {
+            id: format!("entity:{}", entity.id),
+            kind: kind.into(),
+            label: entity.name.clone(),
+            mentions: entity.mention_count,
+            role: None,
+            faction_ids: Vec::new(),
+        });
+    }
+
+    let mut edges: Vec<GraphEdge> = Vec::new();
+    let mut relationship_keys: HashMap<(String, String, String), (f64, String)> = HashMap::new();
+    for relationship in &relationships {
+        if relationship.character_a_id == relationship.character_b_id {
+            continue;
+        }
+        let (a, b) = if relationship.character_a_id < relationship.character_b_id {
+            (
+                relationship.character_a_id.clone(),
+                relationship.character_b_id.clone(),
+            )
+        } else {
+            (
+                relationship.character_b_id.clone(),
+                relationship.character_a_id.clone(),
+            )
+        };
+        let kind = relationship.kind.clone().unwrap_or_default();
+        let key = (a, b, kind);
+        let weight = relationship.intensity.max(1.0);
+        relationship_keys
+            .entry(key)
+            .and_modify(|entry| {
+                if weight > entry.0 {
+                    entry.0 = weight;
+                    entry.1 = relationship.id.clone();
+                }
+            })
+            .or_insert((weight, relationship.id.clone()));
+    }
+    for ((a, b, kind), (weight, id)) in relationship_keys {
+        edges.push(GraphEdge {
+            id: format!("rel:{id}"),
+            source: format!("char:{a}"),
+            target: format!("char:{b}"),
+            kind: "relationship".into(),
+            subtype: if kind.is_empty() { None } else { Some(kind) },
+            weight,
+            origin: "manual".into(),
+            evidence: None,
+            evidence_scene_id: None,
+        });
+    }
+
+    for affiliation in &affiliations {
+        if !matches!(affiliation.entity_type.as_str(), "faction" | "location") {
+            continue;
+        }
+        edges.push(GraphEdge {
+            id: format!("aff:{}", affiliation.id),
+            source: format!("char:{}", affiliation.character_id),
+            target: format!("entity:{}", affiliation.entity_id),
+            kind: "affiliation".into(),
+            subtype: Some(affiliation.role.clone()),
+            weight: if affiliation.role == "leader" {
+                2.0
+            } else {
+                1.5
+            },
+            origin: affiliation.source.clone(),
+            evidence: affiliation.evidence.clone(),
+            evidence_scene_id: affiliation.evidence_scene_id.clone(),
+        });
+    }
+
+    for relation in &entity_relations {
+        let kind = if relation.kind == "territory" {
+            "territory"
+        } else {
+            relation.kind.as_str()
+        };
+        edges.push(GraphEdge {
+            id: format!("ent:{}", relation.id),
+            source: format!("entity:{}", relation.a_entity_id),
+            target: format!("entity:{}", relation.b_entity_id),
+            kind: kind.into(),
+            subtype: None,
+            weight: if kind == "conflict" { 2.5 } else { 2.0 },
+            origin: relation.source.clone(),
+            evidence: relation.evidence.clone(),
+            evidence_scene_id: relation.evidence_scene_id.clone(),
+        });
+    }
+
+    // Solo los lugares más presentes de cada personaje para no saturar el mapa.
+    let mut presence_by_character: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+    for ((character_id, entity_id), count) in presence {
+        presence_by_character
+            .entry(character_id)
+            .or_default()
+            .push((entity_id, count));
+    }
+    for (character_id, mut locations) in presence_by_character {
+        locations.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        locations.truncate(5);
+        for (entity_id, count) in locations {
+            edges.push(GraphEdge {
+                id: format!("presence:{character_id}:{entity_id}"),
+                source: format!("char:{character_id}"),
+                target: format!("entity:{entity_id}"),
+                kind: "presence".into(),
+                subtype: None,
+                weight: count as f64,
+                origin: "derived".into(),
+                evidence: None,
+                evidence_scene_id: None,
+            });
+        }
+    }
+
+    let stats = GraphStats {
+        characters: characters.len(),
+        factions: entities
+            .iter()
+            .filter(|e| e.entity_type == "faction")
+            .count(),
+        locations: entities
+            .iter()
+            .filter(|e| e.entity_type == "location")
+            .count(),
+        relationships: edges.iter().filter(|e| e.kind == "relationship").count(),
+        affiliations: edges.iter().filter(|e| e.kind == "affiliation").count(),
+        presence: edges.iter().filter(|e| e.kind == "presence").count(),
+        entity_relations: edges
+            .iter()
+            .filter(|e| matches!(e.kind.as_str(), "territory" | "alliance" | "conflict"))
+            .count(),
+    };
+
+    Ok(GraphData {
+        nodes,
+        edges,
+        stats,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Relaciones
 // ---------------------------------------------------------------------------
 
@@ -1855,6 +2826,32 @@ pub fn update_entity(
             "el nombre de la entidad no puede estar vacío".into(),
         ));
     }
+
+    // Cambiar el tipo invalidaría los roles de afiliación y las relaciones
+    // (una facción no puede convertirse en lugar conservando territorio).
+    let current_type: Option<String> = conn
+        .query_row(
+            "SELECT entity_type FROM entity WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if current_type.as_deref() != Some(entity_type) {
+        let links: i64 = conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM character_affiliation WHERE entity_id = ?1)
+                  + (SELECT COUNT(*) FROM entity_relation
+                     WHERE a_entity_id = ?1 OR b_entity_id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if links > 0 {
+            return Err(AppError::Validation(
+                "no se puede cambiar el tipo de una entidad con vínculos; elimina antes sus afiliaciones y relaciones"
+                    .into(),
+            ));
+        }
+    }
+
     let affected = conn.execute(
         "UPDATE entity SET name = ?1, entity_type = ?2, aliases_json = ?3,
          description = ?4, updated_at = ?5 WHERE id = ?6",
@@ -2710,6 +3707,219 @@ mod tests {
         assert_eq!(view.source, "manual");
     }
 
+    fn insert_character(conn: &Connection, project_id: &str, name: &str) -> Character {
+        let character = Character::new(project_id, name);
+        conn.execute(
+            "INSERT INTO character (id, project_id, name, aliases_json, traits_json,
+             goals_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '[]', '[]', '[]', ?4, ?4)",
+            params![
+                character.id,
+                character.project_id,
+                character.name,
+                character.created_at
+            ],
+        )
+        .unwrap();
+        character
+    }
+
+    fn insert_entity(conn: &Connection, project_id: &str, name: &str, entity_type: &str) -> Entity {
+        let entity = Entity::new(project_id, name, entity_type);
+        conn.execute(
+            "INSERT INTO entity (id, project_id, name, entity_type, aliases_json,
+             description, mention_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, '[]', NULL, 1, ?5, ?5)",
+            params![
+                entity.id,
+                entity.project_id,
+                entity.name,
+                entity.entity_type,
+                entity.created_at
+            ],
+        )
+        .unwrap();
+        entity
+    }
+
+    #[test]
+    fn wiki_graph_links_affiliations_and_derived_presence() {
+        let conn = crate::db::test_connection();
+        let project = create_project(&conn, "Grafo", None, 5000, None, None).unwrap();
+        let chapter = Chapter::new(&project.id, "Cap 1", 1);
+        conn.execute(
+            "INSERT INTO chapter (id, project_id, position, title, status, summary, word_count)
+             VALUES (?1, ?2, ?3, ?4, 'draft', NULL, 10)",
+            params![
+                chapter.id,
+                chapter.project_id,
+                chapter.position,
+                chapter.title
+            ],
+        )
+        .unwrap();
+        let scene = Scene::new(&chapter.id, 1, Some("Llegada".to_string()));
+        conn.execute(
+            "INSERT INTO scene (id, chapter_id, position, title, content_markdown, summary,
+             word_count, created_at, updated_at, status, pov, location, time_label)
+             VALUES (?1, ?2, ?3, ?4, 'Elena caminó por Vela al amanecer.', NULL, 8, ?5, ?5,
+                     'draft', 'Elena', 'Vela', NULL)",
+            params![
+                scene.id,
+                scene.chapter_id,
+                scene.position,
+                scene.title,
+                scene.created_at
+            ],
+        )
+        .unwrap();
+
+        let elena = insert_character(&conn, &project.id, "Elena");
+        let guard = insert_entity(&conn, &project.id, "Guardia", "faction");
+        let vela = insert_entity(&conn, &project.id, "Vela", "location");
+
+        set_affiliation_manual(
+            &conn,
+            &project.id,
+            &elena.id,
+            &guard.id,
+            "member",
+            None,
+            None,
+        )
+        .unwrap();
+        let graph = wiki_graph(&conn, &project.id).unwrap();
+        assert_eq!(graph.stats.characters, 1);
+        assert_eq!(graph.stats.factions, 1);
+        assert_eq!(graph.stats.locations, 1);
+        assert_eq!(graph.stats.affiliations, 1);
+        assert!(graph.stats.presence >= 1);
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|e| e.kind == "affiliation" && e.target == format!("entity:{}", guard.id))
+        );
+        assert!(graph.edges.iter().any(|e| e.kind == "presence"
+            && e.target == format!("entity:{}", vela.id)
+            && e.origin == "derived"));
+        let elena_node = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == format!("char:{}", elena.id))
+            .unwrap();
+        assert!(elena_node.mentions >= 1);
+        assert_eq!(elena_node.faction_ids, vec![guard.id.clone()]);
+    }
+
+    #[test]
+    fn manual_affiliation_wins_and_roles_are_type_checked() {
+        let conn = crate::db::test_connection();
+        let project = create_project(&conn, "Vínculos", None, 5000, None, None).unwrap();
+        let elena = insert_character(&conn, &project.id, "Elena");
+        let guard = insert_entity(&conn, &project.id, "Guardia", "faction");
+        let vela = insert_entity(&conn, &project.id, "Vela", "location");
+
+        assert!(
+            suggest_affiliation(
+                &conn,
+                &project.id,
+                &elena.id,
+                &guard.id,
+                "member",
+                Some(0.8),
+                Some("Elena sirve en la Guardia"),
+                None
+            )
+            .unwrap()
+        );
+        set_affiliation_manual(
+            &conn,
+            &project.id,
+            &elena.id,
+            &guard.id,
+            "leader",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            !suggest_affiliation(
+                &conn,
+                &project.id,
+                &elena.id,
+                &guard.id,
+                "rival",
+                Some(0.9),
+                Some("Elena odia a la Guardia"),
+                None
+            )
+            .unwrap()
+        );
+        let affiliations = list_affiliations(&conn, &project.id).unwrap();
+        assert_eq!(affiliations.len(), 1);
+        assert_eq!(affiliations[0].role, "leader");
+        assert_eq!(affiliations[0].source, "manual");
+
+        assert!(
+            validate_affiliation_role("faction", "resident").is_err(),
+            "un rol de lugar no vale para una facción"
+        );
+        assert!(
+            set_affiliation_manual(
+                &conn,
+                &project.id,
+                &elena.id,
+                &vela.id,
+                "resident",
+                None,
+                None
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn entity_relations_are_symmetric_and_typed() {
+        let conn = crate::db::test_connection();
+        let project = create_project(&conn, "Facciones", None, 5000, None, None).unwrap();
+        let a = insert_entity(&conn, &project.id, "Costa Norte", "faction");
+        let b = insert_entity(&conn, &project.id, "Costa Sur", "faction");
+        let port = insert_entity(&conn, &project.id, "Puerto", "location");
+
+        let first =
+            set_entity_relation_manual(&conn, &project.id, &b.id, &a.id, "alliance", None, None)
+                .unwrap();
+        // El orden se canonicaliza: la misma pareja no se duplica al invertirla.
+        let second =
+            set_entity_relation_manual(&conn, &project.id, &a.id, &b.id, "alliance", None, None)
+                .unwrap();
+        assert_eq!(first.id, second.id);
+        assert_eq!(list_entity_relations(&conn, &project.id).unwrap().len(), 1);
+
+        // Una pareja no puede ser aliada y enemiga a la vez.
+        assert!(
+            set_entity_relation_manual(&conn, &project.id, &a.id, &b.id, "conflict", None, None)
+                .is_err()
+        );
+
+        set_entity_relation_manual(&conn, &project.id, &a.id, &port.id, "territory", None, None)
+            .unwrap();
+        // Territorio solo va de facción a lugar.
+        assert!(
+            set_entity_relation_manual(
+                &conn,
+                &project.id,
+                &port.id,
+                &a.id,
+                "territory",
+                None,
+                None
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn duplicate_project_copies_custom_fields() {
         let mut conn = crate::db::test_connection();
@@ -2743,5 +3953,58 @@ mod tests {
         let fields = list_character_fields(&conn, &copied_character.id).unwrap();
         let wound = fields.iter().find(|f| f.key == "herida").unwrap();
         assert_eq!(wound.value, Some(serde_json::json!("en el brazo")));
+    }
+
+    #[test]
+    fn duplicate_project_copies_affiliations_and_entity_relations() {
+        let mut conn = crate::db::test_connection();
+        let project = create_project(&conn, "Mundo copiado", None, 5000, None, None).unwrap();
+        let character = insert_character(&conn, &project.id, "Lía");
+        let north = insert_entity(&conn, &project.id, "Costa Norte", "faction");
+        let south = insert_entity(&conn, &project.id, "Costa Sur", "faction");
+        let port = insert_entity(&conn, &project.id, "Puerto", "location");
+
+        set_affiliation_manual(
+            &conn,
+            &project.id,
+            &character.id,
+            &north.id,
+            "member",
+            None,
+            None,
+        )
+        .unwrap();
+        set_entity_relation_manual(
+            &conn,
+            &project.id,
+            &north.id,
+            &south.id,
+            "alliance",
+            None,
+            None,
+        )
+        .unwrap();
+        set_entity_relation_manual(
+            &conn,
+            &project.id,
+            &north.id,
+            &port.id,
+            "territory",
+            None,
+            None,
+        )
+        .unwrap();
+
+        let copy = duplicate_project(&mut conn, &project.id).unwrap();
+        let affiliations = list_affiliations(&conn, &copy.id).unwrap();
+        assert_eq!(affiliations.len(), 1);
+        assert_eq!(affiliations[0].character_name, "Lía");
+        assert_eq!(affiliations[0].entity_name, "Costa Norte");
+        assert_eq!(affiliations[0].role, "member");
+
+        let relations = list_entity_relations(&conn, &copy.id).unwrap();
+        assert_eq!(relations.len(), 2);
+        assert!(relations.iter().any(|r| r.kind == "alliance"));
+        assert!(relations.iter().any(|r| r.kind == "territory"));
     }
 }

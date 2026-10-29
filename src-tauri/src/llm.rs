@@ -579,12 +579,18 @@ pub fn suggest_affiliations(
     Ok(out)
 }
 
-/// Construye el contexto (escenas que mencionan al personaje).
-pub fn context_for(name: &str, texts: &[String]) -> String {
-    let needle = crate::repo::normalize_key(name);
+/// Construye el contexto (escenas que mencionan al personaje por su nombre o
+/// alguno de sus alias).
+pub fn context_for(name: &str, aliases: &[String], texts: &[String]) -> String {
+    let terms: Vec<String> = std::iter::once(name)
+        .chain(aliases.iter().map(String::as_str))
+        .map(crate::repo::normalize_key)
+        .filter(|term| !term.is_empty())
+        .collect();
     let mut out = String::new();
     for text in texts {
-        if !needle.is_empty() && crate::repo::normalize_key(text).contains(&needle) {
+        let normalized = crate::repo::normalize_key(text);
+        if terms.iter().any(|term| normalized.contains(term)) {
             out.push_str(text);
             out.push_str("\n\n");
         }
@@ -855,6 +861,19 @@ mod tests {
         for expected in ["openai", "anthropic", "gemini", "groq", "mistral"] {
             assert!(providers.iter().any(|p| p.id == expected));
         }
+    }
+
+    #[test]
+    fn context_includes_scenes_with_aliases() {
+        let texts = vec![
+            "Elena cruzó el puente.".to_string(),
+            "La joven Lía miró al mar.".to_string(),
+            "Marco cerró la puerta.".to_string(),
+        ];
+        let context = context_for("Elena", &["Lía".to_string()], &texts);
+        assert!(context.contains("Elena"));
+        assert!(context.contains("Lía"));
+        assert!(!context.contains("Marco"));
     }
 
     #[test]

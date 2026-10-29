@@ -1434,7 +1434,7 @@ pub fn extract_affiliations(
 
     for (index, character) in characters.iter().enumerate() {
         emit_progress(&app, index, characters.len(), "afiliaciones");
-        let context = llm::context_for(&character.name, &texts);
+        let context = llm::context_for(&character.name, &character.aliases, &texts);
         if crate::fields::normalize_text(&context).chars().count() < 120 {
             report.insufficient += 1;
             continue;
@@ -1694,7 +1694,7 @@ fn run_enrichment(
 
     for (index, character) in targets.iter().enumerate() {
         emit_progress(app, index, targets.len(), "enriqueciendo");
-        let context = llm::context_for(&character.name, &texts);
+        let context = llm::context_for(&character.name, &character.aliases, &texts);
 
         if crate::fields::normalize_text(&context).chars().count() < 120 {
             let conn = lock(db)?;
